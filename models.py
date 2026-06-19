@@ -1,16 +1,19 @@
 # models.py
 from sqlalchemy import JSON
 from datetime import datetime
+from decimal import Decimal
 from sqlalchemy import (
     Boolean, DateTime, Integer, String, Numeric, Enum, 
-    ForeignKey, UniqueConstraint, func, text, BigInteger, Text
+    ForeignKey, UniqueConstraint, func, text, BigInteger, Text, CheckConstraint
 )
+
 import enum
-import uuid
-from sqlalchemy.dialects.postgresql import UUID
+
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from enum import Enum as PyEnum
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from db import Base
+from uuid import UUID, uuid4
 from sqlalchemy.dialects.postgresql import JSONB
 
 class LicenseStatus(str, enum.Enum):
@@ -21,11 +24,12 @@ class LicenseStatus(str, enum.Enum):
 class License(Base):
     __tablename__ = "licenses"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4
-    )
+    id: Mapped[UUID] = mapped_column(
+    PG_UUID(as_uuid=True),
+    primary_key=True,
+    default=uuid4,
+    index=True
+)
 
     user_id: Mapped[str] = mapped_column(String(128), nullable=False)
 
@@ -326,3 +330,513 @@ class PaypalWebhookEvent(Base):
     resource_id: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+class Company(Base):
+
+    __tablename__ = "empresa"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True
+    )
+
+    uuid: Mapped[str] = mapped_column(
+        String(36),
+        unique=True,
+        nullable=False,
+        default=lambda: str(uuid4()),
+        index=True
+    )
+
+    nombre: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False
+    )
+    
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default=text("1"))
+
+    telefono: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True
+    )
+
+    rnc: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True
+    )
+
+    direccion: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    ncf: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=text("false")
+    )
+
+    uso_balanza: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=text("false")
+    )
+
+    facturas_electronicas: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=text("false")
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        String(20),
+        default="synced",
+        server_default=text("'synced'")
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+    
+class User(Base):
+
+    __tablename__ = "usuarios"
+
+    id: Mapped[UUID] = mapped_column(
+    PG_UUID(as_uuid=True),
+    primary_key=True,
+    default=uuid4,
+    index=True
+)
+    empresa_uuid: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+        index=True
+    )
+
+    nombre: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False
+    )
+
+    usuario: Mapped[str] = mapped_column(
+        String(100),
+        unique=True,
+        nullable=False,
+        index=True
+    )
+
+    password_hash: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False
+    )
+
+    activo: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default=text("true")
+    )
+
+    permitir_nube: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=text("false")
+    )
+
+    token: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+    
+    codigo: Mapped[str] = mapped_column(
+        String(5),
+        unique=True,
+        nullable=False,
+        index=True
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        default=1,
+        server_default=text("1")
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        String(20),
+        default="synced",
+        server_default=text("'synced'")
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+    
+class CajaConfig(Base):
+
+    __tablename__ = "cajas_config"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        index=True
+    )
+
+    empresa_uuid: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+        index=True
+    )
+
+    nombre: Mapped[str] = mapped_column(
+        String(50),
+        unique=True,
+        nullable=False
+    )
+
+    activa: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default=text("true")
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        default=1,
+        server_default=text("1")
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        String(20),
+        default="synced",
+        server_default=text("'synced'")
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+    
+class CajaMovimiento(Base):
+
+    __tablename__ = "caja_movimientos"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        index=True
+    )
+
+    empresa_uuid: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+        index=True
+    )
+
+    caja_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("cajas.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+
+    usuario_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("usuarios.id"),
+        nullable=True
+    )
+
+    venta_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("ventas.id"),
+        nullable=True
+    )
+
+    tipo: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False
+    )
+
+    monto: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False
+    )
+
+    descripcion: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    solicitado_por: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("usuarios.id"),
+        nullable=True
+    )
+
+    autorizado_por: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("usuarios.id"),
+        nullable=True
+    )
+
+    requiere_autorizacion: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false")
+    )
+
+    estado_autorizacion: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="no_requiere",
+        server_default=text("'no_requiere'")
+    )
+    
+    fecha_autorizacion: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        String(20),
+        default="synced",
+        server_default=text("'synced'")
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+        onupdate=datetime.utcnow
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "tipo IN ('apertura', 'venta', 'ingreso', 'egreso', 'devolucion', 'cierre')",
+            name="check_caja_movimiento_tipo"
+        ),
+
+        CheckConstraint(
+            "monto >= 0",
+            name="check_caja_movimiento_monto"
+        ),
+
+        CheckConstraint(
+            "estado_autorizacion IN ('pendiente', 'aprobado', 'rechazado', 'no_requiere')",
+            name="check_caja_movimiento_estado_autorizacion"
+        ),
+    )
+    
+class Venta(Base):
+
+    __tablename__ = "ventas"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+        index=True
+    )
+
+    cliente_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("clientes.id"),
+        nullable=True
+    )
+
+    total: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False
+    )
+
+    monto_pagado: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        default=0,
+        server_default=text("0")
+    )
+
+    monto_pendiente: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        default=0,
+        server_default=text("0")
+    )
+
+    fecha: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    fecha_vencimiento: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True
+    )
+
+    estado: Mapped[str] = mapped_column(
+        String(20),
+        default="pendiente",
+        server_default=text("'pendiente'")
+    )
+    
+class Caja(Base):
+
+    __tablename__ = "cajas"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        index=True
+    )
+
+    empresa_uuid: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+        index=True
+    )
+
+    caja_config_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("cajas_config.id", ondelete="CASCADE"),
+        nullable=False
+    )
+    
+    numero_sesion: Mapped[int] = mapped_column(
+        BigInteger,
+        unique=True,
+        nullable=False
+    )
+
+    usuario_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("usuarios.id"),
+        nullable=False
+    )
+
+    monto_inicial: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    monto_contado: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 2),
+        nullable=True
+    )
+
+    diferencia: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 2),
+        nullable=True
+    )
+
+    observacion: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    motivo_cierre: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    tipo_cierre: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True
+    )
+
+    cerrada_por: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("usuarios.id"),
+        nullable=True
+    )
+
+    estado: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="abierta",
+        server_default=text("'abierta'")
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="pending",
+        server_default=text("'pending'")
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1")
+    )
+
+    fecha_apertura: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    fecha_cierre: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
