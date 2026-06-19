@@ -2413,55 +2413,6 @@ async def sync_batch(
                             datetime.utcnow()
                         )
 
-                        movimiento = CajaMovimiento(
-
-                            empresa_uuid=
-                                payload["empresa_uuid"],
-
-                            caja_id=
-                                caja.id,
-
-                            usuario_id=
-                                payload.get(
-                                    "usuario_id"
-                                ),
-
-                            tipo="cierre",
-
-                            monto=
-                                payload.get(
-                                    "monto_contado",
-                                    0
-                                ),
-
-                            descripcion=
-                                "Cierre de caja",
-
-                            solicitado_por=
-                                payload.get(
-                                    "cerrada_por"
-                                ),
-
-                            autorizado_por=
-                                payload.get(
-                                    "cerrada_por"
-                                ),
-
-                            requiere_autorizacion=
-                                False,
-
-                            estado_autorizacion=
-                                "no_requiere",
-
-                            fecha_autorizacion=
-                                datetime.utcnow(),
-
-                            sync_status=
-                                "synced"
-                        )
-
-                        db.add(movimiento)
-
                         await db.flush()
                         
             elif item_type == "eliminar_caja":
