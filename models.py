@@ -633,9 +633,9 @@ class CajaMovimiento(Base):
     )
     
     fecha_autorizacion: Mapped[datetime | None] = mapped_column(
-        DateTime,
-        nullable=True
-    )
+    DateTime(timezone=True),
+    nullable=True
+)
 
     sync_status: Mapped[str] = mapped_column(
         String(20),
@@ -644,14 +644,13 @@ class CajaMovimiento(Base):
     )
 
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        nullable=False,
-        server_default=text("CURRENT_TIMESTAMP"),
-        onupdate=datetime.utcnow
-    )
+    DateTime(timezone=True),
+    nullable=False,
+    server_default=text("CURRENT_TIMESTAMP")
+)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP")
     )
@@ -825,13 +824,13 @@ class Caja(Base):
     )
 
     fecha_cierre: Mapped[datetime | None] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=True
     )
 
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        nullable=False,
+        DateTime(timezone=True),
+        nullable=True,
         server_default=text("CURRENT_TIMESTAMP")
     )
 

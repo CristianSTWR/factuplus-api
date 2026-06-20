@@ -9,6 +9,7 @@ import uuid
 import json
 import string
 import jwt
+from jose import jwt, JWTError
 import smtplib
 from email.message import EmailMessage
 from dotenv import load_dotenv
@@ -29,6 +30,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from dateutil import parser
 from passlib.context import CryptContext
 import random
+from zoneinfo import ZoneInfo
 
 
 pwd_context = CryptContext(
@@ -127,6 +129,45 @@ def _rate_limit(request: Request, limiter: TokenBucketLimiter):
 
 APP_CANCEL = "luna://paypal/cancel"
 
+async def verificar_token(
+    token: str,
+    db: AsyncSession
+):
+
+    try:
+
+        token_data = jwt.decode(
+            token,
+            JWT_SECRET,
+            algorithms=[JWT_ALGORITHM]
+        )
+
+        user_id = token_data["user_id"]
+
+        usuario_actual = (
+            await db.execute(
+                select(User).where(
+                    User.id == user_id,
+                    User.activo == True
+                )
+            )
+        ).scalar_one_or_none()
+
+        if not usuario_actual:
+
+            raise HTTPException(
+                status_code=401,
+                detail="Usuario inválido"
+            )
+
+        return usuario_actual
+
+    except JWTError:
+
+        raise HTTPException(
+            status_code=401,
+            detail="Token inválido o expirado"
+        )
 # =========================
 # MODELOS
 # =========================
@@ -1896,39 +1937,48 @@ PRIORIDAD_SYNC = {
     "actualizar_movimiento_caja": 5,
 }
 
-from datetime import datetime, timezone
+
+from datetime import datetime, timezone, timedelta
+
+RD = timezone(timedelta(hours=-4))
 
 def parse_datetime(value):
 
     if not value:
         return None
 
-    if isinstance(value, datetime):
+    dt = datetime.fromisoformat(
+        value.replace("Z", "+00:00")
+    )
 
-        dt = value
-
-    else:
-
-        dt = datetime.fromisoformat(
-            value.replace("Z", "+00:00")
-        )
-
-    if dt.tzinfo is not None:
-
-        dt = dt.astimezone(
-            timezone.utc
-        ).replace(tzinfo=None)
-
-    return dt
+    return dt.astimezone(RD)
 
 @app.post("/sync/batch")
 async def sync_batch(
     items: List[dict],
+    authorization: str = Header(None),
     _=Depends(require_internal_key),
     db: AsyncSession = Depends(get_db),
 ):
 
     try:
+        
+        if not authorization:
+            raise HTTPException(
+                status_code=401,
+                detail="Token requerido"
+            )
+
+        token = authorization.replace(
+            "Bearer ",
+            ""
+        )
+
+        usuario_actual = await verificar_token(
+            token,
+            db
+        )
+
 
         items_ordenados = sorted(
             items,
@@ -2140,12 +2190,7 @@ async def sync_batch(
 
                 if not exists:
                     
-                    print(
-                        "FECHA PARSEADA:",
-                        parse_datetime(
-                            payload.get("fecha_autorizacion")
-                        )
-                    )
+
 
                     movimiento = CajaMovimiento(
                         id=movimiento_id,
@@ -2197,6 +2242,14 @@ async def sync_batch(
                         )
                         if payload.get("fecha_autorizacion")
                         else None,
+                        
+                        created_at=parse_datetime(
+                            payload.get("created_at")
+                        ) if payload.get("created_at") else None,
+
+                        updated_at=parse_datetime(
+                            payload.get("updated_at")
+                        ) if payload.get("updated_at") else None,
 
                         sync_status=payload.get(
                             "sync_status",
@@ -2204,10 +2257,10 @@ async def sync_batch(
                         )
                     )
 
-                    print(
+                    """ print(
                         "MOVIMIENTO PAYLOAD:",
                         payload
-                    )
+                    ) """
 
                     db.add(movimiento)
                     
@@ -2360,6 +2413,12 @@ async def sync_batch(
                             payload["empresa_uuid"]
                     )
                 )
+                
+                print(
+                        "CERRAR CAJA:",
+                        payload
+                    )
+              
 
                 caja = q.scalar_one_or_none()
 
@@ -2372,8 +2431,12 @@ async def sync_batch(
                         caja.estado = "cerrada"
 
                         caja.fecha_cierre = (
-                            datetime.utcnow()
+                        parse_datetime(
+                            payload.get("fecha_cierre")
                         )
+                        if payload.get("fecha_cierre")
+                        else None
+                    )
 
                         caja.monto_contado = (
                             payload.get(
@@ -2410,8 +2473,12 @@ async def sync_batch(
                         )
 
                         caja.updated_at = (
-                            datetime.utcnow()
+                        parse_datetime(
+                            payload.get("updated_at")
                         )
+                        if payload.get("updated_at")
+                        else None
+                    )
 
                         await db.flush()
                         
@@ -2524,9 +2591,29 @@ async def company_changes(
 async def users_changes(
     empresa_uuid: str,
     since: str | None = None,
+    authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
+    
+    
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
 
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+    
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+    
+    
+    
     query = select(User).where(
         User.empresa_uuid == empresa_uuid
     )
@@ -2585,8 +2672,25 @@ async def users_changes(
 async def cajas_config_changes(
     empresa_uuid: str,
     since: str | None = None,
+    authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
+    
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+    
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
 
     query = select(CajaConfig).where(
         CajaConfig.empresa_uuid == empresa_uuid
@@ -2625,12 +2729,29 @@ async def cajas_changes(
     since: str | None = None,
     limit: int = 5000,
     offset: int = 0,
+    authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
 
     query = select(Caja).where(
         Caja.empresa_uuid == empresa_uuid
     )
+    
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+    
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
 
     if since:
 
@@ -2723,8 +2844,24 @@ async def caja_movimientos_changes(
     since: str | None = None,
     limit: int = 5000,
     offset: int = 0,
+    authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+    
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
 
     query = (
         select(CajaMovimiento)
@@ -2793,8 +2930,6 @@ async def register_user(
 ):
     try:
 
-        print("PAYLOAD:", payload)
-
         nombre = str(
             payload.get("nombre", "")
         ).strip()
@@ -2819,6 +2954,80 @@ async def register_user(
                 status_code=400,
                 detail="Empresa requerida"
             )
+            
+        empresa = await db.execute(
+            select(Company).where(
+                Company.uuid == empresa_uuid
+            )
+        )
+
+        empresa_obj = (
+            empresa.scalar_one_or_none()
+        )
+
+        if not empresa_obj:
+            raise HTTPException(
+                status_code=404,
+                detail="La empresa no existe"
+            )
+    
+        total_users = await db.execute(
+            select(func.count(User.id))
+            .where(
+                User.empresa_uuid == empresa_uuid
+            )
+        )
+
+        cantidad_usuarios = (
+            total_users.scalar() or 0
+        )
+
+        print(
+            f"USUARIOS EMPRESA {empresa_uuid}:",
+            cantidad_usuarios
+        )
+
+        # Si ya existe al menos un usuario
+        # exigir api_key
+
+        if cantidad_usuarios > 0:
+
+            token = str(
+                payload.get(
+                    "token",
+                    ""
+                )
+            ).strip()
+
+            if not token:
+
+                raise HTTPException(
+                    status_code=401,
+                    detail="Token requerido"
+                )
+
+            try:
+                
+                usuario_actual = await verificar_token(
+                    token,
+                    db
+                )
+
+                if (
+                    usuario_actual.empresa_uuid
+                    != empresa_uuid
+                ):
+                    raise HTTPException(
+                        status_code=403,
+                        detail="La empresa no coincide"
+                    )
+
+            except JWTError:
+
+                raise HTTPException(
+                    status_code=401,
+                    detail="Token inválido o expirado"
+                )
 
         if not nombre:
             raise HTTPException(
@@ -2944,11 +3153,13 @@ async def register_user(
             detail=str(e)
         )
         
+
 @app.post("/login-user")
 async def login_user(
     payload: dict,
     db: AsyncSession = Depends(get_db)
 ):
+
     usuario = str(
         payload.get("usuario", "")
     ).strip()
@@ -2975,6 +3186,7 @@ async def login_user(
     user = result.scalar_one_or_none()
 
     if not user:
+
         raise HTTPException(
             status_code=401,
             detail="Usuario o contraseña incorrectos"
@@ -2984,13 +3196,26 @@ async def login_user(
         contraseña,
         user.password_hash
     ):
+
         raise HTTPException(
             status_code=401,
             detail="Usuario o contraseña incorrectos"
         )
 
+    token = jwt.encode(
+        {
+            "user_id": str(user.id),
+            "empresa_uuid": user.empresa_uuid,
+            "usuario": user.usuario,
+            "exp": datetime.utcnow() + timedelta(days=30)
+        },
+        JWT_SECRET,
+        algorithm=JWT_ALGORITHM
+    )
+
     return {
         "ok": True,
+        "token": token,
         "id": str(user.id),
         "empresa_uuid": user.empresa_uuid,
         "nombre": user.nombre,
@@ -2999,7 +3224,7 @@ async def login_user(
         "activo": user.activo,
         "permitir_nube": user.permitir_nube
     }
-
+    
 @app.post("/verify-password")
 async def verify_password(
     payload: dict,
@@ -3046,4 +3271,59 @@ async def verify_password(
 
     return {
         "ok": True
+    }
+    
+@app.get("/empresa/restaurar/{empresa_uuid}")
+async def restaurar_empresa(
+    empresa_uuid: str,
+    db: AsyncSession = Depends(get_db)
+):
+
+    empresa = (
+        await db.execute(
+            select(Company).where(
+                Company.uuid == empresa_uuid
+            )
+        )
+    ).scalar_one_or_none()
+
+    if not empresa:
+        raise HTTPException(
+            status_code=404,
+            detail="Empresa no encontrada"
+        )
+
+    usuarios = (
+        await db.execute(
+            select(User).where(
+                User.empresa_uuid == empresa_uuid
+            )
+        )
+    ).scalars().all()
+
+    return {
+        "empresa": {
+            "uuid": empresa.uuid,
+            "nombre": empresa.nombre,
+            "rnc": empresa.rnc,
+            "telefono": empresa.telefono,
+            "direccion": empresa.direccion,
+            "ncf": empresa.ncf
+        },
+        "usuarios": [
+            {
+                "id": str(u.id),
+                "empresa_uuid": u.empresa_uuid,
+                "nombre": u.nombre,
+                "usuario": u.usuario,
+                "codigo": u.codigo,
+                "activo": u.activo,
+                "permitir_nube": u.permitir_nube,
+                "sync_status": u.sync_status,
+                "version": u.version,
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+                "updated_at": u.updated_at.isoformat() if u.updated_at else None
+            }
+            for u in usuarios
+        ]
     }
