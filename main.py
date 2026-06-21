@@ -3590,49 +3590,171 @@ def enviar_correo_aprobacion_dispositivo(
 ):
 
     html = f"""
+    <!DOCTYPE html>
     <html>
-    <body>
-        <h2>Nueva solicitud de acceso</h2>
+    <head>
+    <meta charset="utf-8">
+    </head>
 
-        <p>
-            Un dispositivo desea vincularse a la empresa
-            <strong>{empresa_nombre}</strong>.
+    <body style="
+        margin:0;
+        padding:0;
+        background:#f4f6f9;
+        font-family:Arial,Helvetica,sans-serif;
+    ">
+
+    <table width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+    <td align="center" style="padding:40px 20px;">
+
+    <table width="650" cellpadding="0" cellspacing="0" style="
+        background:white;
+        border-radius:12px;
+        overflow:hidden;
+        box-shadow:0 5px 20px rgba(0,0,0,.08);
+    ">
+
+    <tr>
+    <td style="
+        background:#0d6efd;
+        color:white;
+        text-align:center;
+        padding:30px;
+    ">
+        <h1 style="margin:0;">
+            FactuPlus
+        </h1>
+
+        <p style="
+            margin-top:10px;
+            opacity:.9;
+        ">
+            Solicitud de Vinculación de Dispositivo
+        </p>
+    </td>
+    </tr>
+
+    <tr>
+    <td style="padding:35px;">
+
+        <h2 style="
+            color:#212529;
+            margin-top:0;
+        ">
+            Nuevo dispositivo solicitando acceso
+        </h2>
+
+        <p style="
+            color:#495057;
+            font-size:15px;
+            line-height:1.7;
+        ">
+            Se ha detectado una nueva solicitud para vincular un
+            dispositivo a la empresa:
         </p>
 
-        <p>
-            <strong>Dispositivo:</strong>
-            {nombre_dispositivo}
+        <div style="
+            background:#f8f9fa;
+            border-left:5px solid #0d6efd;
+            padding:20px;
+            border-radius:8px;
+            margin:20px 0;
+        ">
+            <p style="margin:0;">
+                <strong>Empresa:</strong>
+                {empresa_nombre}
+            </p>
+
+            <p style="
+                margin-top:10px;
+                margin-bottom:0;
+            ">
+                <strong>Dispositivo:</strong>
+                {nombre_dispositivo}
+            </p>
+        </div>
+
+        <p style="
+            color:#6c757d;
+            margin-bottom:30px;
+        ">
+            Si reconoces este dispositivo, puedes aprobarlo.
+            En caso contrario, rechaza la solicitud.
         </p>
 
-        <br>
+        <table width="100%">
+        <tr>
 
-        <a
-            href="{aprobar_url}"
+        <td align="center">
+            <a href="{aprobar_url}"
             style="
-                background:#28a745;
+                display:inline-block;
+                background:#198754;
                 color:white;
-                padding:12px 20px;
                 text-decoration:none;
-                border-radius:6px;
-            "
-        >
-            Aprobar
-        </a>
+                padding:14px 28px;
+                border-radius:8px;
+                font-weight:bold;
+                font-size:15px;
+            ">
+                ✅ Aprobar Dispositivo
+            </a>
+        </td>
 
-        <br><br>
-
-        <a
-            href="{rechazar_url}"
+        <td align="center">
+            <a href="{rechazar_url}"
             style="
+                display:inline-block;
                 background:#dc3545;
                 color:white;
-                padding:12px 20px;
                 text-decoration:none;
-                border-radius:6px;
-            "
-        >
-            Rechazar
-        </a>
+                padding:14px 28px;
+                border-radius:8px;
+                font-weight:bold;
+                font-size:15px;
+            ">
+                ❌ Rechazar Dispositivo
+            </a>
+        </td>
+
+        </tr>
+        </table>
+
+        <hr style="
+            margin:35px 0;
+            border:none;
+            border-top:1px solid #e9ecef;
+        ">
+
+        <p style="
+            color:#6c757d;
+            font-size:13px;
+            line-height:1.6;
+        ">
+            Por motivos de seguridad, solo aprueba dispositivos
+            que pertenezcan a tu empresa.
+        </p>
+
+    </td>
+    </tr>
+
+    <tr>
+    <td style="
+        background:#f8f9fa;
+        text-align:center;
+        padding:20px;
+        color:#6c757d;
+        font-size:12px;
+    ">
+        © FactuPlus • Sistema de Facturación y Gestión Empresarial
+    </td>
+    </tr>
+
+    </table>
+
+    </td>
+    </tr>
+    </table>
 
     </body>
     </html>
