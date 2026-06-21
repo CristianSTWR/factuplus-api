@@ -178,6 +178,7 @@ class ActivateRequest(BaseModel):
 class ActivateResponse(BaseModel):
     accessToken: str
     refreshToken: str
+    token: str
 
 class RefreshRequest(BaseModel):
     refreshToken: str = Field(..., min_length=10)
@@ -389,7 +390,14 @@ async def activate(req: ActivateRequest, request: Request, db: AsyncSession = De
     access = issue_access_token(req.licenseKey, req.deviceId)
     refresh = await create_refresh_session(db, license_id, req.deviceId)
     logger.info("activate issued tokens")
-    return {"accessToken": access, "refreshToken": refresh}
+    token = jwt.encode(
+        {
+            "exp": datetime.utcnow() + timedelta(days=5)
+        },
+        JWT_SECRET,
+        algorithm=JWT_ALGORITHM
+    )
+    return {"accessToken": access, "refreshToken": refresh, "token": token}
 
 @app.post("/refresh", response_model=RefreshResponse)
 async def refresh(req: RefreshRequest, request: Request, db: AsyncSession = Depends(get_db)):
@@ -1974,10 +1982,18 @@ async def sync_batch(
             ""
         )
 
-        usuario_actual = await verificar_token(
-            token,
-            db
+        # Solo verificar usuario si NO viene create_company
+        hay_create_company = any(
+            item.get("type") == "create_company"
+            for item in items
         )
+
+        if not hay_create_company:
+
+            usuario_actual = await verificar_token(
+                token,
+                db
+            )
 
 
         items_ordenados = sorted(
@@ -2541,22 +2557,43 @@ async def sync_batch(
             detail=str(e)
         )
 
-
 @app.get("/sync/empresa/changes")
 async def company_changes(
-    empresa_uuid: str,
+    authorization: str = Header(None),
+
+    empresa_uuid: str | None = None,
     since: str | None = None,
     db: AsyncSession = Depends(get_db)
 ):
+
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
 
     query = select(Company).where(
         Company.uuid == empresa_uuid
     )
 
     if since:
+
         since_dt = parser.isoparse(since)
 
-        since_dt = since_dt.replace(tzinfo=None)
+        since_dt = since_dt.replace(
+            tzinfo=None
+        )
 
         query = query.where(
             Company.updated_at > since_dt
@@ -2564,27 +2601,28 @@ async def company_changes(
 
     q = await db.execute(query)
 
-    companies = q.scalars().all()
+    company = q.scalar_one_or_none()
+
+    if not company:
+        return []
 
     return [
         {
-            "uuid": c.uuid,
-            "nombre": c.nombre,
-            "telefono": c.telefono,
-            "rnc": c.rnc,
-            "direccion": c.direccion,
-
-            "ncf": c.ncf,
-            "uso_balanza": c.uso_balanza,
-            "facturas_electronicas": c.facturas_electronicas,
-
-            "version": c.version,
-            "sync_status": c.sync_status,
-
-            "updated_at": c.updated_at.isoformat()
-            if c.updated_at else None
+            "uuid": company.uuid,
+            "nombre": company.nombre,
+            "telefono": company.telefono,
+            "rnc": company.rnc,
+            "direccion": company.direccion,
+            "ncf": company.ncf,
+            "uso_balanza": company.uso_balanza,
+            "facturas_electronicas": company.facturas_electronicas,
+            "version": company.version,
+            "sync_status": company.sync_status,
+            "updated_at":
+                company.updated_at.isoformat()
+                if company.updated_at
+                else None
         }
-        for c in companies
     ]
     
 @app.get("/sync/usuarios/changes")
@@ -3000,33 +3038,53 @@ async def register_user(
             ).strip()
 
             if not token:
-
                 raise HTTPException(
                     status_code=401,
                     detail="Token requerido"
                 )
 
-            try:
-                
-                usuario_actual = await verificar_token(
-                    token,
-                    db
+            usuario_actual = await verificar_token(
+                token,
+                db
+            )
+
+            if (
+                usuario_actual.empresa_uuid
+                != empresa_uuid
+            ):
+                raise HTTPException(
+                    status_code=403,
+                    detail="La empresa no coincide"
                 )
 
-                if (
-                    usuario_actual.empresa_uuid
-                    != empresa_uuid
-                ):
-                    raise HTTPException(
-                        status_code=403,
-                        detail="La empresa no coincide"
-                    )
+        else:
 
-            except JWTError:
+            token_tmp = str(
+                payload.get(
+                    "token_tmp",
+                    ""
+                )
+            ).strip()
+
+            if not token_tmp:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Token temporal requerido"
+                )
+
+            try:
+
+                jwt.decode(
+                    token_tmp,
+                    JWT_SECRET,
+                    algorithms=[JWT_ALGORITHM]
+                )
+
+            except Exception:
 
                 raise HTTPException(
                     status_code=401,
-                    detail="Token inválido o expirado"
+                    detail="Token temporal inválido"
                 )
 
         if not nombre:
