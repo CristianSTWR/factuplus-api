@@ -490,6 +490,11 @@ class User(Base):
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP")
     )
+    
+    correo: Mapped[str | None] = mapped_column(
+    String(255),
+    nullable=True
+)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -838,4 +843,50 @@ class Caja(Base):
         DateTime,
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP")
+    )
+    
+class EmpresaDispositivo(Base):
+
+    __tablename__ = "empresa_dispositivos"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True
+    )
+
+    empresa_uuid: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=False,
+        index=True
+    )
+
+    dispositivo_uuid: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        unique=True,
+        index=True
+    )
+
+    nombre_dispositivo: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False
+    )
+
+    estado: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="PENDIENTE",
+        server_default=text("'PENDIENTE'")
+    )
+
+    fecha_solicitud: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    fecha_aprobacion: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True
     )

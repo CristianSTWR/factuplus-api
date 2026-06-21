@@ -72,7 +72,7 @@ from typing import Optional
 from urllib.parse import urlparse, parse_qs
 import httpx
 import re
-from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja
+from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, EmpresaDispositivo
 
 from db import get_db
 
@@ -3273,6 +3273,143 @@ async def verify_password(
         "ok": True
     }
     
+
+@app.post("/empresa/dispositivo/solicitar")
+async def solicitar_dispositivo(
+    payload: dict,
+    db: AsyncSession = Depends(get_db)
+):
+
+    empresa_uuid = payload["empresa_uuid"]
+    dispositivo_uuid = payload["dispositivo_uuid"]
+    nombre_dispositivo = payload["nombre_dispositivo"]
+
+    q = await db.execute(
+        select(EmpresaDispositivo).where(
+            EmpresaDispositivo.empresa_uuid == empresa_uuid,
+            EmpresaDispositivo.dispositivo_uuid == dispositivo_uuid
+        )
+    )
+
+    dispositivo = q.scalar_one_or_none()
+
+    if dispositivo:
+
+        return {
+            "ok": True,
+            "estado": dispositivo.estado
+        }
+
+    q = await db.execute(
+        select(Company).where(
+            Company.uuid == empresa_uuid
+        )
+    )
+
+    empresa = q.scalar_one_or_none()
+
+    if not empresa:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Empresa no encontrada"
+        )
+
+    dispositivo = EmpresaDispositivo(
+        empresa_uuid=empresa_uuid,
+        dispositivo_uuid=dispositivo_uuid,
+        nombre_dispositivo=nombre_dispositivo,
+        estado="PENDIENTE"
+    )
+
+    db.add(dispositivo)
+
+    await db.commit()
+
+    await db.refresh(dispositivo)
+
+    q = await db.execute(
+        select(User).where(
+            User.empresa_uuid == empresa_uuid,
+            User.activo == True,
+            User.permitir_nube == True
+        )
+    )
+
+    admins = q.scalars().all()
+
+    aprobar_url = (
+    f"http://107.174.181.56:8000/"
+    f"empresa/dispositivo/aprobar/"
+    f"{dispositivo.id}"
+)
+    rechazar_url = (
+        f"https://api.factuplus.com/"
+        f"empresa/dispositivo/rechazar/"
+        f"{dispositivo.id}"
+    )
+
+    for admin in admins:
+
+        try:
+
+            enviar_correo_aprobacion_dispositivo(
+                admin.correo,
+                nombre_dispositivo,
+                empresa.nombre,
+                aprobar_url,
+                rechazar_url
+            )
+
+        except Exception as e:
+
+            print(
+                f"Error enviando correo a "
+                f"{admin.correo}: {e}"
+            )
+
+    return {
+        "ok": True,
+        "estado": "PENDIENTE",
+        "mensaje": (
+            "Solicitud enviada. "
+            "Esperando aprobación."
+        )
+    }   
+@app.get("/empresa/dispositivo/estado")
+async def verificar_estado(
+    empresa_uuid: str,
+    dispositivo_uuid: str,
+    db: AsyncSession = Depends(get_db)
+):
+
+    q = await db.execute(
+        text("""
+            SELECT estado
+            FROM empresa_dispositivos
+            WHERE empresa_uuid = :empresa_uuid
+            AND dispositivo_uuid = :dispositivo_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "dispositivo_uuid": dispositivo_uuid
+        }
+    )
+
+    row = q.mappings().first()
+
+    if not row:
+
+        return {
+            "estado": "NO_EXISTE"
+        }
+
+    return {
+        "estado": row["estado"]
+    }
+    
+
+    
 @app.get("/empresa/restaurar/{empresa_uuid}")
 async def restaurar_empresa(
     empresa_uuid: str,
@@ -3327,3 +3464,161 @@ async def restaurar_empresa(
             for u in usuarios
         ]
     }
+    
+from fastapi.responses import HTMLResponse
+
+@app.get(
+    "/empresa/dispositivo/aprobar/{id}"
+)
+async def aprobar_dispositivo(
+    id: int,
+    db: AsyncSession = Depends(get_db)
+):
+
+    await db.execute(
+        text("""
+            UPDATE empresa_dispositivos
+            SET
+                estado = 'APROBADO',
+                fecha_aprobacion = NOW()
+            WHERE id = :id
+        """),
+        {
+            "id": id
+        }
+    )
+
+    await db.commit()
+
+    return HTMLResponse("""
+        <h2>
+            Dispositivo aprobado correctamente
+        </h2>
+    """)
+    
+@app.get(
+    "/empresa/dispositivo/rechazar/{id}"
+)
+async def rechazar_dispositivo(
+    id: int,
+    db: AsyncSession = Depends(get_db)
+):
+
+    await db.execute(
+        text("""
+            UPDATE empresa_dispositivos
+            SET estado = 'RECHAZADO'
+            WHERE id = :id
+        """),
+        {
+            "id": id
+        }
+    )
+
+    await db.commit()
+
+    return HTMLResponse("""
+        <h2>
+            Solicitud rechazada
+        </h2>
+    """)
+    
+def enviar_correo_aprobacion_dispositivo(
+    destinatario: str,
+    nombre_dispositivo: str,
+    empresa_nombre: str,
+    aprobar_url: str,
+    rechazar_url: str
+):
+
+    html = f"""
+    <html>
+    <body>
+        <h2>Nueva solicitud de acceso</h2>
+
+        <p>
+            Un dispositivo desea vincularse a la empresa
+            <strong>{empresa_nombre}</strong>.
+        </p>
+
+        <p>
+            <strong>Dispositivo:</strong>
+            {nombre_dispositivo}
+        </p>
+
+        <br>
+
+        <a
+            href="{aprobar_url}"
+            style="
+                background:#28a745;
+                color:white;
+                padding:12px 20px;
+                text-decoration:none;
+                border-radius:6px;
+            "
+        >
+            Aprobar
+        </a>
+
+        <br><br>
+
+        <a
+            href="{rechazar_url}"
+            style="
+                background:#dc3545;
+                color:white;
+                padding:12px 20px;
+                text-decoration:none;
+                border-radius:6px;
+            "
+        >
+            Rechazar
+        </a>
+
+    </body>
+    </html>
+    """
+
+    msg = EmailMessage()
+
+    msg["Subject"] = (
+        "FactuPlus - Solicitud de acceso"
+    )
+
+    msg["From"] = EMAIL_FROM
+
+    msg["To"] = destinatario
+
+    msg.set_content(
+        f"""
+        Dispositivo:
+        {nombre_dispositivo}
+
+        Aprobar:
+        {aprobar_url}
+
+        Rechazar:
+        {rechazar_url}
+        """
+    )
+
+    msg.add_alternative(
+        html,
+        subtype="html"
+    )
+
+    with smtplib.SMTP_SSL(
+        SMTP_HOST,
+        SMTP_PORT
+    ) as smtp:
+
+        smtp.login(
+            SMTP_USER,
+            SMTP_APP_PASSWORD
+        )
+
+        smtp.send_message(msg)
+
+    return True
+    
