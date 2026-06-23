@@ -2814,8 +2814,40 @@ async def cajas_changes(
         print("REPR SINCE_DT:", repr(since_dt))
 
     print(query)
+    
+    print(
+    "SINCE_DT:",
+    since_dt,
+    type(since_dt)
+)
+    
+    print("SINCE ORIGINAL:", since)
 
-    result = await db.execute(query)
+    since_dt = parser.isoparse(since)
+
+    print("SINCE PARSEADO:", since_dt)
+
+    query = query.where(
+        Caja.updated_at > since_dt
+    )
+
+    print(
+        query.compile(
+            compile_kwargs={"literal_binds": True}
+        )
+    )
+
+    result = await db.execute(
+    select(Caja.updated_at)
+    .where(Caja.empresa_uuid == empresa_uuid)
+    .order_by(Caja.updated_at.desc())
+    .limit(5)
+)
+    
+    for r in result:
+        print("DB UPDATED:", r[0], type(r[0]))
+        
+        
 
     cajas = result.scalars().all()
     
