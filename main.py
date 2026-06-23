@@ -2258,14 +2258,6 @@ async def sync_batch(
                         )
                         if payload.get("fecha_autorizacion")
                         else None,
-                        
-                        created_at=parse_datetime(
-                            payload.get("created_at")
-                        ) if payload.get("created_at") else None,
-
-                        updated_at=parse_datetime(
-                            payload.get("updated_at")
-                        ) if payload.get("updated_at") else None,
 
                         sync_status=payload.get(
                             "sync_status",
@@ -2887,6 +2879,7 @@ async def caja_movimientos_changes(
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
+
     token = authorization.replace(
         "Bearer ",
         ""
@@ -2896,67 +2889,100 @@ async def caja_movimientos_changes(
         token,
         db
     )
-    
+
     if usuario_actual.empresa_uuid != empresa_uuid:
         raise HTTPException(
             status_code=403,
             detail="Acceso denegado"
         )
 
-    query = (
-        select(CajaMovimiento)
-        .where(
-            CajaMovimiento.empresa_uuid == empresa_uuid
-        )
-        .order_by(CajaMovimiento.updated_at.asc())
+    query = select(CajaMovimiento).where(
+        CajaMovimiento.empresa_uuid == empresa_uuid
     )
 
     if since:
 
         since_dt = parser.isoparse(since)
-        since_dt = since_dt.replace(tzinfo=None)
+
+        if since_dt.tzinfo:
+            since_dt = since_dt.replace(
+                tzinfo=None
+            )
 
         query = query.where(
             CajaMovimiento.updated_at > since_dt
         )
 
+    query = query.order_by(
+        CajaMovimiento.updated_at.asc()
+    )
+
     query = query.limit(limit).offset(offset)
 
-    q = await db.execute(query)
+    result = await db.execute(query)
 
-    movimientos = q.scalars().all()
+    movimientos = result.scalars().all()
 
     return {
         "items": [
             {
                 "id": str(m.id),
                 "empresa_uuid": m.empresa_uuid,
-                "caja_id": str(m.caja_id),
-                "usuario_id": str(m.usuario_id) if m.usuario_id else None,
-                "venta_id": str(m.venta_id) if m.venta_id else None,
+
+                "caja_id":
+                    str(m.caja_id)
+                    if m.caja_id
+                    else None,
+
+                "usuario_id":
+                    str(m.usuario_id)
+                    if m.usuario_id
+                    else None,
+
+                "venta_id":
+                    str(m.venta_id)
+                    if m.venta_id
+                    else None,
+
                 "tipo": m.tipo,
-                "monto": float(m.monto or 0),
+
+                "monto":
+                    float(m.monto or 0),
+
                 "descripcion": m.descripcion,
-                "solicitado_por": str(m.solicitado_por) if m.solicitado_por else None,
-                "autorizado_por": str(m.autorizado_por) if m.autorizado_por else None,
-                "requiere_autorizacion": m.requiere_autorizacion,
-                "estado_autorizacion": m.estado_autorizacion,
-                "fecha_autorizacion": (
+
+                "solicitado_por":
+                    str(m.solicitado_por)
+                    if m.solicitado_por
+                    else None,
+
+                "autorizado_por":
+                    str(m.autorizado_por)
+                    if m.autorizado_por
+                    else None,
+
+                "requiere_autorizacion":
+                    m.requiere_autorizacion,
+
+                "estado_autorizacion":
+                    m.estado_autorizacion,
+
+                "fecha_autorizacion":
                     m.fecha_autorizacion.isoformat()
                     if m.fecha_autorizacion
-                    else None
-                ),
+                    else None,
+
                 "sync_status": m.sync_status,
-                "updated_at": (
+
+                "updated_at":
                     m.updated_at.isoformat()
                     if m.updated_at
-                    else None
-                ),
-                "created_at": (
+                    else None,
+
+                "created_at":
                     m.created_at.isoformat()
                     if m.created_at
                     else None
-                )
             }
             for m in movimientos
         ],

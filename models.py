@@ -649,13 +649,13 @@ class CajaMovimiento(Base):
     )
 
     updated_at: Mapped[datetime] = mapped_column(
-    DateTime(timezone=True),
-    nullable=False,
-    server_default=text("CURRENT_TIMESTAMP")
-)
+        DateTime(timezone=True),
+        nullable=True,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        DateTime,
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP")
     )
