@@ -2175,21 +2175,33 @@ async def sync_batch(
                 if caja:
 
                     incoming_version = payload.get("version", 1)
-                    
-                    
 
-                    if incoming_version >= caja.version:
-                        
-                        
+                    if incoming_version > caja.version:
 
                         caja.nombre = payload.get("nombre")
                         caja.activa = payload.get("activa", True)
 
-                        caja.sync_status = payload.get("sync_status", "synced")
-                        caja.deleted_at = payload.get("deleted_at")
+                        caja.sync_status = payload.get(
+                            "sync_status",
+                            "synced"
+                        )
 
-                        caja.version += 1
-                        caja.updated_at = datetime.utcnow()
+                        caja.deleted_at = payload.get(
+                            "deleted_at"
+                        )
+
+                        caja.version = incoming_version
+
+                        caja.updated_at = (
+                            parse_datetime(
+                                payload.get("updated_at")
+                            )
+                            if payload.get("updated_at")
+                            else None
+                        )
+
+                        await db.commit()
+                        await db.refresh(caja)
                         
             elif item_type == "crear_movimiento_caja":
 
