@@ -2791,16 +2791,14 @@ async def cajas_changes(
         Caja.empresa_uuid == empresa_uuid
     )
 
-    print("SINCE RECIBIDO:", since)
-
     if since:
 
         since_dt = parser.isoparse(since)
 
         if since_dt.tzinfo:
-            since_dt = since_dt.replace(tzinfo=None)
-
-        print("SINCE PARSEADO:", since_dt)
+            since_dt = since_dt.replace(
+                tzinfo=None
+            )
 
         query = query.where(
             Caja.updated_at > since_dt
@@ -2812,45 +2810,9 @@ async def cajas_changes(
 
     query = query.limit(limit).offset(offset)
 
-    print(
-        query.compile(
-            compile_kwargs={"literal_binds": True}
-        )
-    )
-
-    db_name = await db.execute(text("SELECT current_database()"))
-    print("DATABASE:", db_name.scalar())
-
     result = await db.execute(query)
-    
-    print("TIPO RESULT:", type(result))
-
-    rows = result.fetchall()
-
-    print("ROWS:", len(rows))
-
-    for r in rows:
-        print(
-            "ROW:",
-            r[0].numero_sesion,
-            r[0].updated_at
-        )
-
-    return {
-        "items": [],
-        "has_more": False
-    }
 
     cajas = result.scalars().all()
-
-    print("TOTAL CAJAS:", len(cajas))
-
-    for c in cajas:
-        print(
-            "CAJA DEVUELTA:",
-            c.numero_sesion,
-            c.updated_at
-        )
 
     return {
         "items": [
@@ -2858,28 +2820,64 @@ async def cajas_changes(
                 "id": str(c.id),
                 "empresa_uuid": c.empresa_uuid,
                 "caja_config_id": str(c.caja_config_id),
-                "numero_sesion": int(c.numero_sesion) if c.numero_sesion is not None else None,
+
+                "numero_sesion":
+                    int(c.numero_sesion)
+                    if c.numero_sesion is not None
+                    else None,
+
                 "usuario_id": str(c.usuario_id),
-                "monto_inicial": float(c.monto_inicial or 0),
-                "monto_contado": float(c.monto_contado) if c.monto_contado is not None else None,
-                "diferencia": float(c.diferencia) if c.diferencia is not None else None,
+
+                "monto_inicial":
+                    float(c.monto_inicial or 0),
+
+                "monto_contado":
+                    float(c.monto_contado)
+                    if c.monto_contado is not None
+                    else None,
+
+                "diferencia":
+                    float(c.diferencia)
+                    if c.diferencia is not None
+                    else None,
+
                 "observacion": c.observacion,
                 "motivo_cierre": c.motivo_cierre,
                 "tipo_cierre": c.tipo_cierre,
-                "cerrada_por": str(c.cerrada_por) if c.cerrada_por else None,
+
+                "cerrada_por":
+                    str(c.cerrada_por)
+                    if c.cerrada_por
+                    else None,
+
                 "estado": c.estado,
                 "sync_status": c.sync_status,
                 "version": c.version,
-                "fecha_apertura": c.fecha_apertura.isoformat() if c.fecha_apertura else None,
-                "fecha_cierre": c.fecha_cierre.isoformat() if c.fecha_cierre else None,
-                "updated_at": c.updated_at.isoformat() if c.updated_at else None,
-                "created_at": c.created_at.isoformat() if c.created_at else None
+
+                "fecha_apertura":
+                    c.fecha_apertura.isoformat()
+                    if c.fecha_apertura
+                    else None,
+
+                "fecha_cierre":
+                    c.fecha_cierre.isoformat()
+                    if c.fecha_cierre
+                    else None,
+
+                "updated_at":
+                    c.updated_at.isoformat()
+                    if c.updated_at
+                    else None,
+
+                "created_at":
+                    c.created_at.isoformat()
+                    if c.created_at
+                    else None
             }
             for c in cajas
         ],
         "has_more": len(cajas) == limit
-    }
-    
+    } 
 @app.get("/sync/caja_movimientos/changes")
 async def caja_movimientos_changes(
     empresa_uuid: str,
