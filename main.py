@@ -2771,10 +2771,6 @@ async def cajas_changes(
     db: AsyncSession = Depends(get_db)
 ):
 
-    query = select(Caja).where(
-        Caja.empresa_uuid == empresa_uuid
-    )
-    
     token = authorization.replace(
         "Bearer ",
         ""
@@ -2784,18 +2780,27 @@ async def cajas_changes(
         token,
         db
     )
-    
-    print("SINCE RECIBIDO:", since)
 
-    since_dt = None
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(Caja).where(
+        Caja.empresa_uuid == empresa_uuid
+    )
+
+    print("SINCE RECIBIDO:", since)
 
     if since:
 
         since_dt = parser.isoparse(since)
 
-        since_dt = since_dt.replace(
-            tzinfo=None
-        )
+        if since_dt.tzinfo:
+            since_dt = since_dt.astimezone().replace(tzinfo=None)
+
+        print("SINCE PARSEADO:", since_dt)
 
         query = query.where(
             Caja.updated_at > since_dt
@@ -2807,53 +2812,18 @@ async def cajas_changes(
 
     query = query.limit(limit).offset(offset)
 
-    print("TIPO SINCE:", type(since))
-
-    if since_dt:
-        print("TIPO SINCE_DT:", type(since_dt))
-        print("REPR SINCE_DT:", repr(since_dt))
-
-    print(query)
-    
-    print(
-    "SINCE_DT:",
-    since_dt,
-    type(since_dt)
-)
-    
-    print("SINCE ORIGINAL:", since)
-
-    since_dt = parser.isoparse(since)
-
-    print("SINCE PARSEADO:", since_dt)
-
-    query = query.where(
-        Caja.updated_at > since_dt
-    )
-
-    print(
-        query.compile(
-            compile_kwargs={"literal_binds": True}
-        )
-    )
-
-    result = await db.execute(
-    select(Caja.updated_at)
-    .where(Caja.empresa_uuid == empresa_uuid)
-    .order_by(Caja.updated_at.desc())
-    .limit(5)
-)
-    
-    for r in result:
-        print("DB UPDATED:", r[0], type(r[0]))
-        
-        
+    result = await db.execute(query)
 
     cajas = result.scalars().all()
-    
-    for m in cajas:
-        print("UPDATED_AT:", m.updated_at)
-        print("ID:", m.id)
+
+    print("TOTAL CAJAS:", len(cajas))
+
+    for c in cajas:
+        print(
+            "CAJA DEVUELTA:",
+            c.numero_sesion,
+            c.updated_at
+        )
 
     return {
         "items": [
@@ -2861,9 +2831,12 @@ async def cajas_changes(
                 "id": str(c.id),
                 "empresa_uuid": c.empresa_uuid,
                 "caja_config_id": str(c.caja_config_id),
-                
-                "numero_sesion": int(c.numero_sesion) if c.numero_sesion is not None else None,
-                
+
+                "numero_sesion":
+                    int(c.numero_sesion)
+                    if c.numero_sesion is not None
+                    else None,
+
                 "usuario_id": str(c.usuario_id),
 
                 "monto_inicial":
@@ -2915,8 +2888,7 @@ async def cajas_changes(
             for c in cajas
         ],
         "has_more": len(cajas) == limit
-    }
-    
+    }  
 
 @app.get("/sync/caja_movimientos/changes")
 async def caja_movimientos_changes(
