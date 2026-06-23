@@ -73,6 +73,7 @@ from urllib.parse import urlparse, parse_qs
 import httpx
 import re
 from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, EmpresaDispositivo
+from models import ListaEspera
 
 from db import get_db
 
@@ -105,7 +106,7 @@ if ALLOWED_ORIGINS:
 
 # Allowed hosts (recommended in prod). If empty, allow all.
 if ALLOWED_HOSTS:
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS) 
 
 
 # Simple in-memory rate limiters (recommended to offload to WAF in production)
@@ -128,6 +129,9 @@ def _rate_limit(request: Request, limiter: TokenBucketLimiter):
         raise HTTPException(status_code=429, detail="Too Many Requests", headers={"Retry-After": str(int(retry) + 1)})
 
 APP_CANCEL = "luna://paypal/cancel"
+
+print("ALLOWED_ORIGINS:", ALLOWED_ORIGINS)
+print("ALLOWED_HOSTS:", ALLOWED_HOSTS)
 
 async def verificar_token(
     token: str,
@@ -192,7 +196,8 @@ class ValidateRequest(BaseModel):
     deviceId: str = Field(..., min_length=16)
 
 @app.get("/health")
-def health():
+async def health():
+    print("ENTRO A HEALTH")
     return {"ok": True}
 
 
@@ -3842,3 +3847,42 @@ def enviar_correo_aprobacion_dispositivo(
 
     return True
     
+""" WEB PAGINA WEB """
+
+class ListaEsperaCreate(BaseModel):
+    empresa: str
+    nombre: str
+    correo: str
+    telefono: str
+
+@app.post("/lista-espera")
+async def registrar_lista_espera(
+    body: ListaEsperaCreate,
+    db: AsyncSession = Depends(get_db)
+):
+
+    existe = await db.scalar(
+        select(ListaEspera).where(
+            ListaEspera.correo == body.correo
+        )
+    )
+
+    if existe:
+        raise HTTPException(
+            status_code=400,
+            detail="Este correo ya está registrado en la lista de espera."
+        )
+
+    registro = ListaEspera(
+        empresa=body.empresa,
+        nombre=body.nombre,
+        correo=body.correo,
+        telefono=body.telefono
+    )
+
+    db.add(registro)
+    await db.commit()
+
+    return {
+        "ok": True
+    }

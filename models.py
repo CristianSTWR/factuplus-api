@@ -890,3 +890,51 @@ class EmpresaDispositivo(Base):
         DateTime,
         nullable=True
     )
+    
+""" WEB PAGINA """
+
+class ListaEspera(Base):
+
+    __tablename__ = "lista_espera"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        index=True
+    )
+
+    empresa: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False
+    )
+
+    nombre: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False
+    )
+
+    correo: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        unique=True,
+        index=True
+    )
+
+    telefono: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True
+    )
+
+    seleccionado: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false")
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
