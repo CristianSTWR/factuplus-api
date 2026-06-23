@@ -2821,20 +2821,28 @@ async def cajas_changes(
     db_name = await db.execute(text("SELECT current_database()"))
     print("DATABASE:", db_name.scalar())
 
-    result = await db.execute(query)
-    
-    print("TIPO RESULT:", type(result))
+    result = await db.execute(
+        text("""
+            SELECT
+                numero_sesion,
+                updated_at
+            FROM cajas
+            WHERE empresa_uuid = :empresa_uuid
+            AND updated_at > :since
+            ORDER BY updated_at ASC
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "since": since_dt
+        }
+    )
 
     rows = result.fetchall()
 
-    print("ROWS:", len(rows))
+    print("ROWS SQL PURO:", len(rows))
 
     for r in rows:
-        print(
-            "ROW:",
-            r[0].numero_sesion,
-            r[0].updated_at
-        )
+        print("ROW:", r.numero_sesion, r.updated_at)
 
     return {
         "items": [],
