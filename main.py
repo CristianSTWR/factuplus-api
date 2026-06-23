@@ -2791,6 +2791,8 @@ async def cajas_changes(
             detail="Acceso denegado"
         )
 
+    print("SINCE RECIBIDO:", since)
+
     if since:
 
         since_dt = parser.isoparse(since)
@@ -2803,6 +2805,8 @@ async def cajas_changes(
             Caja.updated_at > since_dt
         )
 
+        print("SINCE PARSEADO:", since_dt)
+        
     query = query.order_by(
         Caja.updated_at.asc()
     )
@@ -2812,6 +2816,10 @@ async def cajas_changes(
     result = await db.execute(query)
 
     cajas = result.scalars().all()
+    
+    for m in cajas:
+        print("UPDATED_AT:", m.updated_at)
+        print("ID:", m.id)
 
     return {
         "items": [
