@@ -2785,17 +2785,13 @@ async def cajas_changes(
         db
     )
     
-    if usuario_actual.empresa_uuid != empresa_uuid:
-        raise HTTPException(
-            status_code=403,
-            detail="Acceso denegado"
-        )
-
     print("SINCE RECIBIDO:", since)
+
+    since_dt = None
 
     if since:
 
-        """since_dt = parser.isoparse(since)
+        since_dt = parser.isoparse(since)
 
         since_dt = since_dt.replace(
             tzinfo=None
@@ -2803,15 +2799,21 @@ async def cajas_changes(
 
         query = query.where(
             Caja.updated_at > since_dt
-        )  """
+        )
 
-        print("SINCE PARSEADO:", since)
-        
     query = query.order_by(
         Caja.updated_at.asc()
     )
 
     query = query.limit(limit).offset(offset)
+
+    print("TIPO SINCE:", type(since))
+
+    if since_dt:
+        print("TIPO SINCE_DT:", type(since_dt))
+        print("REPR SINCE_DT:", repr(since_dt))
+
+    print(query)
 
     result = await db.execute(query)
 
