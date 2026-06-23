@@ -2811,6 +2811,18 @@ async def cajas_changes(
     )
 
     query = query.limit(limit).offset(offset)
+    
+    print(
+    query.compile(
+        db.bind.sync_engine,
+        compile_kwargs={"literal_binds": True}
+    )
+)
+    print(
+    query.compile(
+        compile_kwargs={"literal_binds": True}
+    )
+)
 
     result = await db.execute(query)
 
