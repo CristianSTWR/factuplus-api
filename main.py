@@ -2795,7 +2795,7 @@ async def cajas_changes(
 
     if since:
 
-        since_dt = parser.isoparse(since)
+        """since_dt = parser.isoparse(since)
 
         since_dt = since_dt.replace(
             tzinfo=None
@@ -2803,9 +2803,9 @@ async def cajas_changes(
 
         query = query.where(
             Caja.updated_at > since_dt
-        )
+        )  """
 
-        print("SINCE PARSEADO:", since_dt)
+        print("SINCE PARSEADO:", since)
         
     query = query.order_by(
         Caja.updated_at.asc()
