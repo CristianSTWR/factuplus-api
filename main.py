@@ -2822,6 +2822,24 @@ async def cajas_changes(
     print("DATABASE:", db_name.scalar())
 
     result = await db.execute(query)
+    
+    print("TIPO RESULT:", type(result))
+
+    rows = result.fetchall()
+
+    print("ROWS:", len(rows))
+
+    for r in rows:
+        print(
+            "ROW:",
+            r[0].numero_sesion,
+            r[0].updated_at
+        )
+
+    return {
+        "items": [],
+        "has_more": False
+    }
 
     cajas = result.scalars().all()
 
