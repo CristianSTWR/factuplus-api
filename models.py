@@ -549,8 +549,8 @@ class CajaConfig(Base):
     )
 
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        nullable=False,
+        DateTime(timezone=True),
+        nullable=True,
         server_default=text("CURRENT_TIMESTAMP")
     )
 
