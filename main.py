@@ -72,8 +72,11 @@ from typing import Optional
 from urllib.parse import urlparse, parse_qs
 import httpx
 import re
-from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, EmpresaDispositivo
-from models import ListaEspera
+# APLICACION
+from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, Producto, UnidadMedida
+
+# WEB
+from models import ListaEspera, EmpresaDispositivo
 
 from db import get_db
 
@@ -2010,6 +2013,7 @@ async def sync_batch(
                 "asignar_caja": 4,
                 "crear_movimiento_caja": 5,
                 "cerrar_caja": 6,
+                "crear_producto": 6,
             }.get(x["type"], 999)
         )
         
@@ -2523,6 +2527,104 @@ async def sync_batch(
                     caja.sync_status = "synced"
                     caja.version += 1
                     
+            elif item_type == "crear_unidad_medida":
+
+                unidad_id = UUID(payload["id"])
+
+                q = await db.execute(
+                    select(UnidadMedida).where(
+                        UnidadMedida.id == unidad_id
+                    )
+                )
+
+                unidad = q.scalar_one_or_none()
+
+                if not unidad:
+
+                    unidad = UnidadMedida(
+                        id=unidad_id,
+                        empresa_uuid=payload["empresa_uuid"],
+                        nombre=payload["nombre"],
+                        plural=payload["plural"],
+                        permitir_decimal=payload.get(
+                            "permitir_decimal",
+                            False
+                        ),
+                        version=payload.get(
+                            "version",
+                            1
+                        ),
+                        sync_status="synced",
+                        created_at=(
+                            parse_datetime(
+                                payload["created_at"]
+                            )
+                            if payload.get("created_at")
+                            else None
+                        ),
+                        updated_at=(
+                            parse_datetime(
+                                payload["updated_at"]
+                            )
+                            if payload.get("updated_at")
+                            else None
+                        )
+                    )
+
+                    db.add(unidad)
+
+                    await db.flush()
+               
+                    
+            elif item_type == "crear_producto":
+
+                producto_id = UUID(payload["id"])
+
+                q = await db.execute(
+                    select(Producto).where(
+                        Producto.id == producto_id,
+                        Producto.empresa_uuid == payload["empresa_uuid"]
+                    )
+                )
+
+                producto = q.scalar_one_or_none()
+
+                if not producto:
+
+                    producto = Producto(
+                        id=producto_id,
+                        empresa_uuid=payload["empresa_uuid"],
+                        codigo_barras=payload.get("codigo_barras"),
+                        codigo_balanza=payload.get("codigo_balanza"),
+                        codigo_interno=payload["codigo_interno"],
+                        es_balanza=payload.get("es_balanza", False),
+                        nombre=payload["nombre"],
+                        precio=payload.get("precio", 0),
+                        costo=payload.get("costo", 0),
+                        stock=payload.get("stock", 0),
+                        stock_minimo=payload.get("stock_minimo", 0),
+                        itbis=payload.get("itbis", 0),
+                        unidad_id=UUID(payload["unidad_id"]),
+                        activo=payload.get("activo", True),
+                        version=payload.get("version", 1),
+                        sync_status="synced",
+                        created_at=(
+                            parse_datetime(payload["created_at"])
+                            if payload.get("created_at")
+                            else None
+                        ),
+                        updated_at=(
+                            parse_datetime(payload["updated_at"])
+                            if payload.get("updated_at")
+                            else None
+                        )
+                    )
+
+                    db.add(producto)
+
+                    await db.flush()
+                    
+                 
             
 
             """ elif item_type == "create_producto":

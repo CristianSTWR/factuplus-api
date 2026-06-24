@@ -845,6 +845,190 @@ class Caja(Base):
         server_default=text("CURRENT_TIMESTAMP")
     )
     
+class UnidadMedida(Base):
+
+    __tablename__ = "unidades_medida"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4
+    )
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        String(36),
+        nullable=False,
+        index=True
+    )
+
+    nombre: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False
+    )
+
+    plural: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False
+    )
+
+    permitir_decimal: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        default=1
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        String(20),
+        default="synced"
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False
+    )
+
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False
+    )
+    
+class Producto(Base):
+
+    __tablename__ = "productos"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        index=True
+    )
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        String(36),
+        nullable=False,
+        index=True
+    )
+
+    codigo_barras: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True
+    )
+
+    codigo_balanza: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True
+    )
+
+    codigo_interno: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False
+    )
+
+    es_balanza: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false")
+    )
+
+    nombre: Mapped[str] = mapped_column(
+        Text,
+        nullable=False
+    )
+
+    precio: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    costo: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    stock: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    stock_minimo: Mapped[Decimal] = mapped_column(
+        Numeric(12, 3),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    itbis: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    unidad_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "unidades_medida.id",
+            ondelete="RESTRICT"
+        ),
+        nullable=False
+    )
+
+    activo: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true")
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="pending",
+        server_default=text("'pending'")
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1")
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False
+    )
+
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False
+    )
+    
+    
+""" WEB PAGINA """
+
 class EmpresaDispositivo(Base):
 
     __tablename__ = "empresa_dispositivos"
@@ -891,7 +1075,6 @@ class EmpresaDispositivo(Base):
         nullable=True
     )
     
-""" WEB PAGINA """
 
 class ListaEspera(Base):
 
