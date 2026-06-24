@@ -2989,6 +2989,7 @@ async def cajas_changes(
         ],
         "has_more": len(cajas) == limit
     } 
+
 @app.get("/sync/caja_movimientos/changes")
 async def caja_movimientos_changes(
     empresa_uuid: str,
@@ -3106,6 +3107,129 @@ async def caja_movimientos_changes(
             for m in movimientos
         ],
         "has_more": len(movimientos) == limit
+    }
+
+@app.get("/sync/productos/changes")
+async def productos_changes(
+    empresa_uuid: str,
+    since: str | None = None,
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(Producto).where(
+        Producto.empresa_uuid == empresa_uuid
+    )
+
+    if since:
+
+        since_dt = parser.isoparse(since)
+
+        if since_dt.tzinfo:
+            since_dt = since_dt.replace(
+                tzinfo=None
+            )
+
+        query = query.where(
+            Producto.updated_at > since_dt
+        )
+
+    query = query.order_by(
+        Producto.updated_at.asc()
+    )
+
+    query = query.limit(limit).offset(offset)
+
+    result = await db.execute(query)
+
+    productos = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(p.id),
+                "empresa_uuid": p.empresa_uuid,
+
+                "codigo_barras":
+                    p.codigo_barras,
+
+                "codigo_balanza":
+                    p.codigo_balanza,
+
+                "codigo_interno":
+                    p.codigo_interno,
+
+                "es_balanza":
+                    p.es_balanza,
+
+                "nombre":
+                    p.nombre,
+
+                "precio":
+                    float(p.precio or 0),
+
+                "costo":
+                    float(p.costo or 0),
+
+                "stock":
+                    float(p.stock or 0),
+
+                "stock_minimo":
+                    float(
+                        p.stock_minimo or 0
+                    ),
+
+                "itbis":
+                    float(p.itbis or 0),
+
+                "unidad_id":
+                    str(p.unidad_id),
+
+                "activo":
+                    p.activo,
+
+                "sync_status":
+                    p.sync_status,
+
+                "version":
+                    p.version,
+
+                "updated_at":
+                    p.updated_at.isoformat()
+                    if p.updated_at
+                    else None,
+
+                "created_at":
+                    p.created_at.isoformat()
+                    if p.created_at
+                    else None,
+
+                "deleted_at":
+                    p.deleted_at.isoformat()
+                    if p.deleted_at
+                    else None
+            }
+            for p in productos
+        ],
+        "has_more": len(productos) == limit
     }
 
 @app.post("/registrar-users")
