@@ -95,15 +95,18 @@ app.add_middleware(MaxBodySizeMiddleware, max_bytes=MAX_BODY_BYTES)
 app.add_middleware(SecurityHeadersMiddleware, is_prod=IS_PROD)
 
 # CORS (set ALLOWED_ORIGINS in env). If empty, do not enable permissive CORS.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+if ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=ALLOWED_ORIGINS,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Internal-Key", "X-Request-Id"],
+    )
 
 # Allowed hosts (recommended in prod). If empty, allow all.
+if ALLOWED_HOSTS:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS) 
 
 
 # Simple in-memory rate limiters (recommended to offload to WAF in production)
