@@ -3232,6 +3232,101 @@ async def productos_changes(
         "has_more": len(productos) == limit
     }
 
+@app.get("/sync/unidades_medida/changes")
+async def unidades_medida_changes(
+    empresa_uuid: str,
+    since: str | None = None,
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(UnidadMedida).where(
+        UnidadMedida.empresa_uuid == empresa_uuid
+    )
+
+    if since:
+
+        since_dt = parser.isoparse(since)
+
+        if since_dt.tzinfo:
+            since_dt = since_dt.replace(
+                tzinfo=None
+            )
+
+        query = query.where(
+            UnidadMedida.updated_at > since_dt
+        )
+
+    query = query.order_by(
+        UnidadMedida.updated_at.asc()
+    )
+
+    query = query.limit(limit).offset(offset)
+
+    result = await db.execute(query)
+
+    unidades = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(u.id),
+
+                "empresa_uuid":
+                    u.empresa_uuid,
+
+                "nombre":
+                    u.nombre,
+
+                "plural":
+                    u.plural,
+
+                "permitir_decimal":
+                    u.permitir_decimal,
+
+                "sync_status":
+                    u.sync_status,
+
+                "version":
+                    u.version,
+
+                "updated_at":
+                    u.updated_at.isoformat()
+                    if u.updated_at
+                    else None,
+
+                "created_at":
+                    u.created_at.isoformat()
+                    if u.created_at
+                    else None,
+
+                "deleted_at":
+                    u.deleted_at.isoformat()
+                    if u.deleted_at
+                    else None
+            }
+            for u in unidades
+        ],
+        "has_more": len(unidades) == limit
+    }
 @app.post("/registrar-users")
 async def register_user(
     payload: dict,
