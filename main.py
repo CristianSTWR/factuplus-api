@@ -105,8 +105,6 @@ if ALLOWED_ORIGINS:
     )
 
 # Allowed hosts (recommended in prod). If empty, allow all.
-if ALLOWED_HOSTS:
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS) 
 
 
 # Simple in-memory rate limiters (recommended to offload to WAF in production)
