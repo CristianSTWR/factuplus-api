@@ -3763,7 +3763,7 @@ async def solicitar_dispositivo(
     admins = q.scalars().all()
 
     aprobar_url = (
-    f"http://107.174.181.56:8000/"
+    f"https://api.factuplus.com/"
     f"empresa/dispositivo/aprobar/"
     f"{dispositivo.id}"
 )
