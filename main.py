@@ -2624,6 +2624,56 @@ async def sync_batch(
 
                     await db.flush()
                     
+            elif item_type == "actualizar_producto":
+
+                producto_id = payload["id"]
+
+                q = await db.execute(
+                    select(Producto).where(
+                        Producto.id == producto_id,
+                        Producto.empresa_uuid == payload.get("empresa_uuid")
+                    )
+                )
+
+                producto = q.scalar_one_or_none()
+
+                if producto:
+
+                    incoming_version = payload.get("version", 1)
+
+                    if incoming_version > producto.version:
+
+                        producto.nombre = payload.get("nombre")
+                        producto.codigo_barras = payload.get("codigo_barras")
+                        producto.itbis = payload.get("itbis", 0)
+                        producto.precio = payload.get("precio", 0)
+                        producto.costo = payload.get("costo", 0)
+                        producto.stock_minimo = payload.get("stock_minimo", 0)
+                        producto.activo = payload.get("activo", True)
+                        producto.unidad_id = payload.get("unidad_id")
+
+                        producto.sync_status = payload.get(
+                            "sync_status",
+                            "synced"
+                        )
+
+                        producto.deleted_at = payload.get(
+                            "deleted_at"
+                        )
+
+                        producto.version = incoming_version
+
+                        producto.updated_at = (
+                            parse_datetime(
+                                payload.get("updated_at")
+                            )
+                            if payload.get("updated_at")
+                            else None
+                        )
+
+                        await db.commit()
+                        await db.refresh(producto)
+                    
                  
             
 
@@ -4204,6 +4254,187 @@ async def registrar_lista_espera(
     db.add(registro)
     await db.commit()
 
+    try:
+        enviar_correo_lista_espera(
+            destinatario=body.correo,
+            nombre=body.nombre,
+            empresa=body.empresa
+        )
+    except Exception as e:
+        print(f"Error enviando correo: {e}")
+
     return {
         "ok": True
     }
+    
+def enviar_correo_lista_espera(
+    destinatario: str,
+    nombre: str,
+    empresa: str
+):
+
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <meta charset="utf-8">
+    </head>
+
+    <body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
+
+    <table width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+    <td align="center" style="padding:40px 20px;">
+
+    <table width="650" cellpadding="0" cellspacing="0"
+    style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 5px 20px rgba(0,0,0,.08);">
+
+        <tr>
+            <td style="background:#0d6efd;padding:40px;text-align:center;">
+
+                <img
+                    src="https://i.postimg.cc/Mp0ZXHtg/logowhite.png"
+                    width="180"
+                    alt="FactuPlus"
+                    style="display:block;margin:auto;margin-bottom:25px;"
+                >
+
+                <h2 style="color:white;margin:0;">
+                    ¡Gracias por registrarte!
+                </h2>
+
+                <p style="color:white;opacity:.9;margin-top:12px;">
+                    Ya formas parte de nuestra lista de espera.
+                </p>
+
+            </td>
+        </tr>
+
+        <tr>
+            <td style="padding:40px;">
+
+                <h2 style="margin-top:0;color:#212529;">
+                    Hola {nombre},
+                </h2>
+
+                <p style="font-size:16px;line-height:1.8;color:#495057;">
+
+                    Hemos recibido correctamente tu solicitud para unirte
+                    a la lista de espera de <strong>FactuPlus</strong>.
+
+                </p>
+
+                <div style="
+                    background:#f8f9fa;
+                    border-left:5px solid #0d6efd;
+                    padding:20px;
+                    border-radius:8px;
+                    margin:30px 0;
+                ">
+
+                    <p style="margin:0;">
+                        <strong>Empresa:</strong> {empresa}
+                    </p>
+
+                    <p style="margin-top:10px;margin-bottom:0;">
+                        <strong>Correo:</strong> {destinatario}
+                    </p>
+
+                </div>
+
+                <p style="
+                    color:#495057;
+                    line-height:1.8;
+                    font-size:15px;
+                ">
+                    Nuestro equipo revisará tu solicitud y te notificará
+                    por este mismo correo cuando tu acceso esté disponible.
+                </p>
+
+                <div style="
+                    background:#eaf4ff;
+                    border-radius:8px;
+                    padding:18px;
+                    margin-top:30px;
+                ">
+
+                    <strong>¿Qué sigue?</strong>
+
+                    <ul style="margin-top:12px;line-height:1.8;">
+                        <li>Revisaremos tu solicitud.</li>
+                        <li>Prepararemos tu acceso.</li>
+                        <li>Recibirás un correo cuando puedas comenzar a utilizar FactuPlus.</li>
+                    </ul>
+
+                </div>
+
+            </td>
+        </tr>
+
+        <tr>
+            <td style="
+                background:#f8f9fa;
+                padding:25px;
+                text-align:center;
+                color:#6c757d;
+                font-size:12px;
+            ">
+
+                © FactuPlus • Sistema de Facturación y Gestión Empresarial
+
+            </td>
+        </tr>
+
+    </table>
+
+    </td>
+    </tr>
+    </table>
+
+    </body>
+    </html>
+    """
+
+    msg = EmailMessage()
+
+    msg["Subject"] = "🎉 Ya estás en la lista de espera de FactuPlus"
+
+    msg["From"] = EMAIL_FROM
+
+    msg["To"] = destinatario
+
+    msg.set_content(
+        f"""
+Hola {nombre},
+
+Gracias por registrarte en la lista de espera de FactuPlus.
+
+Hemos recibido correctamente tu solicitud para la empresa:
+
+{empresa}
+
+Te notificaremos por este mismo correo cuando tu acceso esté disponible.
+
+Equipo FactuPlus
+https://factuplus.com.do
+"""
+    )
+
+    msg.add_alternative(
+        html,
+        subtype="html"
+    )
+
+    with smtplib.SMTP_SSL(
+        SMTP_HOST,
+        SMTP_PORT
+    ) as smtp:
+
+        smtp.login(
+            SMTP_USER,
+            SMTP_APP_PASSWORD
+        )
+
+        smtp.send_message(msg)
+
+    return True
