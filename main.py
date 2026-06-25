@@ -4313,7 +4313,7 @@ def enviar_correo_lista_espera(
         <tr>
             <td style="padding:40px;">
 
-                <h2 style="margin-top:0;color:#212529;">
+                <h2 style="margin-top:0;color:#152530;">
                     Hola {nombre},
                 </h2>
 
