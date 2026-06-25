@@ -4290,10 +4290,10 @@ def enviar_correo_lista_espera(
     style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 5px 20px rgba(0,0,0,.08);">
 
         <tr>
-            <td style="background:#0d6efd;padding:40px;text-align:center;">
+            <td style="background:#ffffff;padding:40px;text-align:center;">
 
                 <img
-                    src="https://i.postimg.cc/Mp0ZXHtg/logowhite.png"
+                    src="https://i.postimg.cc/RVg1nCFR/logo.png"
                     width="180"
                     alt="FactuPlus"
                     style="display:block;margin:auto;margin-bottom:25px;"
@@ -4326,7 +4326,7 @@ def enviar_correo_lista_espera(
 
                 <div style="
                     background:#f8f9fa;
-                    border-left:5px solid #0d6efd;
+                    border-left:5px solid #152530;
                     padding:20px;
                     border-radius:8px;
                     margin:30px 0;
