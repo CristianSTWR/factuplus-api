@@ -901,7 +901,195 @@ class UnidadMedida(Base):
         DateTime(timezone=True),
         nullable=False
     )
+   
+class Permiso(Base):
+
+    __tablename__ = "permisos"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4
+    )
+
+    clave: Mapped[str] = mapped_column(
+        String,
+        unique=True,
+        nullable=False
+    )
+
+    descripcion: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True
+    )
+
+    modulo: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False
+    )   
     
+class RolPermiso(Base):
+
+    __tablename__ = "rol_permisos"
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        String(36),
+        nullable=False,
+        index=True
+    )
+
+    rol_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "roles.id",
+            ondelete="CASCADE"
+        ),
+        primary_key=True
+    )
+
+    permiso_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "permisos.id",
+            ondelete="CASCADE"
+        ),
+        primary_key=True
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        default=1
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        String(20),
+        default="synced"
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False
+    )
+
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+    
+class Rol(Base):
+
+    __tablename__ = "roles"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4
+    )
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        String(36),
+        nullable=False,
+        index=True
+    )
+
+    nombre: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False
+    )
+
+    descripcion: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        default=1
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        String(20),
+        default="synced"
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False
+    )
+
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False
+    )
+    
+class UsuarioRol(Base):
+
+    __tablename__ = "usuario_roles"
+
+    usuario_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "usuarios.id",
+            ondelete="CASCADE"
+        ),
+        primary_key=True
+    )
+
+    rol_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "roles.id",
+            ondelete="CASCADE"
+        ),
+        primary_key=True
+    )
+
+    empresa_uuid: Mapped[UUID] = mapped_column(
+    PG_UUID(as_uuid=True),
+    nullable=False,
+    index=True
+)
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        default=1
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        String(20),
+        default="synced"
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False
+    )
+
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
 class Producto(Base):
 
     __tablename__ = "productos"
@@ -1026,6 +1214,7 @@ class Producto(Base):
         nullable=False
     )
     
+
     
 """ WEB PAGINA """
 
@@ -1074,7 +1263,7 @@ class EmpresaDispositivo(Base):
         DateTime,
         nullable=True
     )
-    
+
 
 class ListaEspera(Base):
 

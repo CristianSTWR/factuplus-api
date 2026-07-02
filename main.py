@@ -73,7 +73,7 @@ from urllib.parse import urlparse, parse_qs
 import httpx
 import re
 # APLICACION
-from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, Producto, UnidadMedida
+from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, Producto, UnidadMedida, Rol, RolPermiso, UsuarioRol
 
 # WEB
 from models import ListaEspera, EmpresaDispositivo
@@ -1991,12 +1991,20 @@ async def sync_batch(
         )
 
         # Solo verificar usuario si NO viene create_company
-        hay_create_company = any(
-            item.get("type") == "create_company"
+        tipos_inicializacion = {
+            "create_company",
+            "crear_unidad_medida",
+            "crear_rol",
+            "crear_rol_permiso",
+            "crear_usuario_rol"
+        }
+
+        requiere_usuario = any(
+            item.get("type") not in tipos_inicializacion
             for item in items
         )
 
-        if not hay_create_company:
+        if requiere_usuario:
 
             usuario_actual = await verificar_token(
                 token,
@@ -2007,16 +2015,19 @@ async def sync_batch(
         items_ordenados = sorted(
             items,
             key=lambda x: {
-                "empresa": 1,
-                "usuario": 2,
-                "crear_caja": 3,
-                "asignar_caja": 4,
-                "crear_movimiento_caja": 5,
-                "cerrar_caja": 6,
-                "crear_producto": 6,
+                "create_company": 1,
+                "crear_unidad_medida": 2,
+                "crear_rol": 3,
+                "crear_rol_permiso": 4,
+                "crear_usuario": 5,
+                "crear_caja": 6,
+                "asignar_caja": 7,
+                "crear_movimiento_caja": 8,
+                "cerrar_caja": 9,
+                "crear_producto": 10,
             }.get(x["type"], 999)
         )
-        
+                
         print("ITEMS RECIBIDOS:")
         for item in items_ordenados:
             print(item["type"])
@@ -2574,6 +2585,139 @@ async def sync_batch(
                     db.add(unidad)
 
                     await db.flush()
+                    
+            elif item_type == "crear_rol":
+
+                rol_id = UUID(payload["id"])
+
+                q = await db.execute(
+                    select(Rol).where(
+                        Rol.id == rol_id
+                    )
+                )
+
+                rol = q.scalar_one_or_none()
+
+                if not rol:
+
+                    rol = Rol(
+                        id=rol_id,
+                        empresa_uuid=payload["empresa_uuid"],
+                        nombre=payload["nombre"],
+                        descripcion=payload.get(
+                            "descripcion"
+                        ),
+                        version=payload.get(
+                            "version",
+                            1
+                        ),
+                        sync_status="synced",
+                        created_at=(
+                            parse_datetime(
+                                payload["created_at"]
+                            )
+                            if payload.get("created_at")
+                            else None
+                        ),
+                        updated_at=(
+                            parse_datetime(
+                                payload["updated_at"]
+                            )
+                            if payload.get("updated_at")
+                            else None
+                        ),
+                        deleted_at=(
+                            parse_datetime(
+                                payload["deleted_at"]
+                            )
+                            if payload.get("deleted_at")
+                            else None
+                        )
+                    )
+
+                    db.add(rol)
+
+                    await db.flush()
+                    
+            elif item_type == "crear_rol_permiso":
+
+                q = await db.execute(
+                    select(RolPermiso).where(
+                        RolPermiso.rol_id == UUID(payload["rol_id"]),
+                        RolPermiso.permiso_id == UUID(payload["permiso_id"])
+                    )
+                )
+
+                rol_permiso = q.scalar_one_or_none()
+
+                if not rol_permiso:
+
+                    rol_permiso = RolPermiso(
+                        empresa_uuid=payload["empresa_uuid"],
+                        rol_id=UUID(payload["rol_id"]),
+                        permiso_id=UUID(payload["permiso_id"]),
+                        version=payload.get("version", 1),
+                        sync_status="synced",
+                        created_at=(
+                            parse_datetime(payload["created_at"])
+                            if payload.get("created_at")
+                            else None
+                        ),
+                        updated_at=(
+                            parse_datetime(payload["updated_at"])
+                            if payload.get("updated_at")
+                            else None
+                        ),
+                        deleted_at=(
+                            parse_datetime(payload["deleted_at"])
+                            if payload.get("deleted_at")
+                            else None
+                        )
+                    )
+
+                    db.add(rol_permiso)
+
+                    await db.flush()
+            
+            elif item_type == "crear_usuario_rol":
+                q = await db.execute(
+                    select(UsuarioRol).where(
+                        UsuarioRol.usuario_id == UUID(payload["usuario_id"]),
+                        UsuarioRol.rol_id == UUID(payload["rol_id"])
+                    )
+                )
+
+                usuario_rol = q.scalar_one_or_none()
+
+                if not usuario_rol:
+
+                    usuario_rol = UsuarioRol(
+                        usuario_id=UUID(payload["usuario_id"]),
+                        rol_id=UUID(payload["rol_id"]),
+                        empresa_uuid=payload["empresa_uuid"],
+                        version=payload.get("version", 1),
+                        sync_status="synced",
+                        created_at=(
+                            parse_datetime(payload["created_at"])
+                            if payload.get("created_at")
+                            else None
+                        ),
+                        updated_at=(
+                            parse_datetime(payload["updated_at"])
+                            if payload.get("updated_at")
+                            else None
+                        ),
+                        deleted_at=(
+                            parse_datetime(payload["deleted_at"])
+                            if payload.get("deleted_at")
+                            else None
+                        )
+                    )
+
+                    db.add(usuario_rol)
+
+                    await db.flush()      
+            
                
                     
             elif item_type == "crear_producto":
@@ -3377,6 +3521,282 @@ async def unidades_medida_changes(
         ],
         "has_more": len(unidades) == limit
     }
+    
+@app.get("/sync/roles/changes")
+async def roles_changes(
+    empresa_uuid: str,
+    since: str | None = None,
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(Rol).where(
+        Rol.empresa_uuid == empresa_uuid
+    )
+
+    if since:
+
+        since_dt = parser.isoparse(since)
+
+        if since_dt.tzinfo:
+            since_dt = since_dt.replace(
+                tzinfo=None
+            )
+
+        query = query.where(
+            Rol.updated_at > since_dt
+        )
+
+    query = query.order_by(
+        Rol.updated_at.asc()
+    )
+
+    query = query.limit(limit).offset(offset)
+
+    result = await db.execute(query)
+
+    roles = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(r.id),
+
+                "empresa_uuid":
+                    r.empresa_uuid,
+
+                "nombre":
+                    r.nombre,
+
+                "descripcion":
+                    r.descripcion,
+
+                "sync_status":
+                    r.sync_status,
+
+                "version":
+                    r.version,
+
+                "updated_at":
+                    r.updated_at.isoformat()
+                    if r.updated_at
+                    else None,
+
+                "created_at":
+                    r.created_at.isoformat()
+                    if r.created_at
+                    else None,
+
+                "deleted_at":
+                    r.deleted_at.isoformat()
+                    if r.deleted_at
+                    else None
+            }
+            for r in roles
+        ],
+        "has_more": len(roles) == limit
+    }
+
+@app.get("/sync/usuario-roles/changes")
+async def usuario_roles_changes(
+    empresa_uuid: str,
+    since: str | None = None,
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(UsuarioRol).where(
+        UsuarioRol.empresa_uuid == empresa_uuid
+    )
+
+    if since:
+
+        since_dt = parser.isoparse(since)
+
+        if since_dt.tzinfo:
+            since_dt = since_dt.replace(
+                tzinfo=None
+            )
+
+        query = query.where(
+            UsuarioRol.updated_at > since_dt
+        )
+
+    query = query.order_by(
+        UsuarioRol.updated_at.asc()
+    )
+
+    query = query.limit(limit).offset(offset)
+
+    result = await db.execute(query)
+
+    usuario_roles = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "usuario_id":
+                    str(ur.usuario_id),
+
+                "rol_id":
+                    str(ur.rol_id),
+
+                "empresa_uuid":
+                    str(ur.empresa_uuid),
+
+                "sync_status":
+                    ur.sync_status,
+
+                "version":
+                    ur.version,
+
+                "updated_at":
+                    ur.updated_at.isoformat()
+                    if ur.updated_at
+                    else None,
+
+                "created_at":
+                    ur.created_at.isoformat()
+                    if ur.created_at
+                    else None,
+
+                "deleted_at":
+                    ur.deleted_at.isoformat()
+                    if ur.deleted_at
+                    else None
+            }
+            for ur in usuario_roles
+        ],
+        "has_more": len(usuario_roles) == limit
+    }
+
+@app.get("/sync/rol-permisos/changes")
+async def rol_permisos_changes(
+    empresa_uuid: str,
+    since: str | None = None,
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(RolPermiso).where(
+        RolPermiso.empresa_uuid == empresa_uuid
+    )
+
+    if since:
+
+        since_dt = parser.isoparse(since)
+
+        if since_dt.tzinfo:
+            since_dt = since_dt.replace(
+                tzinfo=None
+            )
+
+        query = query.where(
+            RolPermiso.updated_at > since_dt
+        )
+
+    query = query.order_by(
+        RolPermiso.updated_at.asc()
+    )
+
+    query = query.limit(limit).offset(offset)
+
+    result = await db.execute(query)
+
+    rol_permisos = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "empresa_uuid":
+                    rp.empresa_uuid,
+
+                "rol_id":
+                    str(rp.rol_id),
+
+                "permiso_id":
+                    str(rp.permiso_id),
+
+                "sync_status":
+                    rp.sync_status,
+
+                "version":
+                    rp.version,
+
+                "updated_at":
+                    rp.updated_at.isoformat()
+                    if rp.updated_at
+                    else None,
+
+                "created_at":
+                    rp.created_at.isoformat()
+                    if rp.created_at
+                    else None,
+
+                "deleted_at":
+                    rp.deleted_at.isoformat()
+                    if rp.deleted_at
+                    else None
+            }
+            for rp in rol_permisos
+        ],
+        "has_more": len(rol_permisos) == limit
+    }
+
 @app.post("/registrar-users")
 async def register_user(
     payload: dict,
@@ -3912,6 +4332,30 @@ async def restaurar_empresa(
         )
     ).scalars().all()
 
+    roles = (
+        await db.execute(
+            select(Rol).where(
+                Rol.empresa_uuid == empresa_uuid
+            )
+        )
+    ).scalars().all()
+
+    rol_permisos = (
+        await db.execute(
+            select(RolPermiso).where(
+                RolPermiso.empresa_uuid == empresa_uuid
+            )
+        )
+    ).scalars().all()
+    
+    usuario_roles = (
+        await db.execute(
+            select(UsuarioRol).where(
+                UsuarioRol.empresa_uuid == empresa_uuid
+            )
+        )
+    ).scalars().all()
+
     return {
         "empresa": {
             "uuid": empresa.uuid,
@@ -3936,9 +4380,48 @@ async def restaurar_empresa(
                 "updated_at": u.updated_at.isoformat() if u.updated_at else None
             }
             for u in usuarios
+        ],
+        "roles": [
+            {
+                "id": str(r.id),
+                "empresa_uuid": r.empresa_uuid,
+                "nombre": r.nombre,
+                "descripcion": r.descripcion,
+                "sync_status": r.sync_status,
+                "version": r.version,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+                "deleted_at": r.deleted_at.isoformat() if r.deleted_at else None
+            }
+            for r in roles
+        ],
+        "rol_permisos": [
+            {
+                "empresa_uuid": rp.empresa_uuid,
+                "rol_id": str(rp.rol_id),
+                "permiso_id": str(rp.permiso_id),
+                "sync_status": rp.sync_status,
+                "version": rp.version,
+                "created_at": rp.created_at.isoformat() if rp.created_at else None,
+                "updated_at": rp.updated_at.isoformat() if rp.updated_at else None,
+                "deleted_at": rp.deleted_at.isoformat() if rp.deleted_at else None
+            }
+            for rp in rol_permisos
+        ],
+        "usuario_roles": [
+            {
+                "empresa_uuid": ur.empresa_uuid,
+                "usuario_id": str(ur.usuario_id),
+                "rol_id": str(ur.rol_id),
+                "sync_status": ur.sync_status,
+                "version": ur.version,
+                "created_at": ur.created_at.isoformat() if ur.created_at else None,
+                "updated_at": ur.updated_at.isoformat() if ur.updated_at else None,
+                "deleted_at": ur.deleted_at.isoformat() if ur.deleted_at else None
+            }
+            for ur in usuario_roles
         ]
-    }
-    
+    }    
 from fastapi.responses import HTMLResponse
 
 @app.get(
