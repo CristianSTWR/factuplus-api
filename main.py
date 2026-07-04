@@ -73,7 +73,7 @@ from urllib.parse import urlparse, parse_qs
 import httpx
 import re
 # APLICACION
-from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, Producto, UnidadMedida, Rol, RolPermiso, UsuarioRol
+from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, Producto, UnidadMedida, Rol, RolPermiso, UsuarioRol, MetodoPago
 
 # WEB
 from models import ListaEspera, EmpresaDispositivo
@@ -1996,7 +1996,8 @@ async def sync_batch(
             "crear_unidad_medida",
             "crear_rol",
             "crear_rol_permiso",
-            "crear_usuario_rol"
+            "crear_usuario_rol",
+            "crear_metodo_pago"
         }
 
         requiere_usuario = any(
@@ -2676,6 +2677,41 @@ async def sync_batch(
                     )
 
                     db.add(rol_permiso)
+
+                    await db.flush()
+                    
+            elif item_type == "crear_metodo_pago":
+
+                q = await db.execute(
+                    select(MetodoPago).where(
+                        MetodoPago.id == UUID(payload["id"])
+                    )
+                )
+
+                metodo_pago = q.scalar_one_or_none()
+
+                if not metodo_pago:
+
+                    metodo_pago = MetodoPago(
+                        id=UUID(payload["id"]),
+                        empresa_uuid=payload["empresa_uuid"],
+                        nombre=payload["nombre"],
+                        activo=payload["activo"],
+                        version=payload.get("version", 1),
+                        sync_status="synced",
+                        created_at=(
+                            parse_datetime(payload["created_at"])
+                            if payload.get("created_at")
+                            else None
+                        ),
+                        updated_at=(
+                            parse_datetime(payload["updated_at"])
+                            if payload.get("updated_at")
+                            else None
+                        )
+                    )
+
+                    db.add(metodo_pago)
 
                     await db.flush()
             
@@ -4355,6 +4391,16 @@ async def restaurar_empresa(
             )
         )
     ).scalars().all()
+    
+    token_tmp = jwt.encode(
+        {
+            "empresa_uuid": empresa.uuid,
+            "tipo": "restore",
+            "exp": datetime.utcnow() + timedelta(minutes=30)
+        },
+        JWT_SECRET,
+        algorithm=JWT_ALGORITHM
+    )
 
     return {
         "empresa": {
@@ -4420,8 +4466,10 @@ async def restaurar_empresa(
                 "deleted_at": ur.deleted_at.isoformat() if ur.deleted_at else None
             }
             for ur in usuario_roles
-        ]
+        ],
+        "token_tmp": token_tmp
     }    
+
 from fastapi.responses import HTMLResponse
 
 @app.get(
@@ -4921,3 +4969,929 @@ https://factuplus.com.do
         smtp.send_message(msg)
 
     return True
+
+""" Resturar con token temporal """
+
+async def verificar_token_restore(
+    token_tmp: str,
+    empresa_uuid: str
+):
+
+    try:
+
+        payload = jwt.decode(
+            token_tmp,
+            JWT_SECRET,
+            algorithms=[JWT_ALGORITHM]
+        )
+
+    except JWTError:
+
+        raise HTTPException(
+            status_code=401,
+            detail="Token temporal inválido"
+        )
+
+    if payload.get("tipo") != "restore":
+        raise HTTPException(
+            status_code=401,
+            detail="Token temporal inválido"
+        )
+
+    if str(payload.get("empresa_uuid")) != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    return payload
+
+@app.get("/restore/empresa/changes")
+async def restore_company_changes(
+    empresa_uuid: str,
+    since: str | None = None,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+    
+    print("TOKEN TEMPORAL:", token_tmp)
+    print("EMPRESA UUID:", empresa_uuid)
+    print("SINCE:", since)
+
+    try:
+
+        payload = jwt.decode(
+            token_tmp,
+            JWT_SECRET,
+            algorithms=[JWT_ALGORITHM]
+        )
+
+    except JWTError:
+
+        raise HTTPException(
+            status_code=401,
+            detail="Token temporal inválido"
+        )
+
+    if str(payload.get("empresa_uuid")) != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(Company).where(
+        Company.uuid == empresa_uuid
+    )
+
+    if since:
+
+        since_dt = parser.isoparse(since)
+
+        if since_dt.tzinfo:
+            since_dt = since_dt.replace(
+                tzinfo=None
+            )
+
+        query = query.where(
+            Company.updated_at > since_dt
+        )
+
+    result = await db.execute(query)
+
+    company = result.scalar_one_or_none()
+
+    if not company:
+        return []
+
+    return [
+        {
+            "uuid": company.uuid,
+            "nombre": company.nombre,
+            "telefono": company.telefono,
+            "rnc": company.rnc,
+            "direccion": company.direccion,
+            "ncf": company.ncf,
+            "uso_balanza": company.uso_balanza,
+            "facturas_electronicas": company.facturas_electronicas,
+            "version": company.version,
+            "sync_status": company.sync_status,
+            "updated_at": (
+                company.updated_at.isoformat()
+                if company.updated_at
+                else None
+            )
+        }
+    ]
+    
+@app.get("/restore/usuarios/changes")
+async def restore_users_changes(
+    empresa_uuid: str,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    try:
+
+        payload = jwt.decode(
+            token_tmp,
+            JWT_SECRET,
+            algorithms=[JWT_ALGORITHM]
+        )
+
+    except JWTError:
+
+        raise HTTPException(
+            status_code=401,
+            detail="Token temporal inválido"
+        )
+
+    if payload.get("tipo") != "restore":
+        raise HTTPException(
+            status_code=401,
+            detail="Token temporal inválido"
+        )
+
+    if str(payload.get("empresa_uuid")) != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    q = await db.execute(
+        select(User).where(
+            User.empresa_uuid == empresa_uuid
+        )
+    )
+
+    users = q.scalars().all()
+
+    return [
+        {
+            "id": str(u.id),
+            "empresa_uuid": u.empresa_uuid,
+            "nombre": u.nombre,
+            "usuario": u.usuario,
+
+            "activo": u.activo,
+            "permitir_nube": u.permitir_nube,
+
+            "token": u.token,
+            "codigo": u.codigo,
+
+            "sync_status": u.sync_status,
+
+            "deleted_at":
+                u.deleted_at.isoformat()
+                if u.deleted_at else None,
+
+            "updated_at":
+                u.updated_at.isoformat()
+                if u.updated_at else None,
+
+            "version": u.version,
+
+            "created_at":
+                u.created_at.isoformat()
+                if u.created_at else None
+        }
+        for u in users
+    ]
+    
+@app.get("/restore/cajas_config/changes")
+async def restore_cajas_config_changes(
+    empresa_uuid: str,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    q = await db.execute(
+        select(CajaConfig).where(
+            CajaConfig.empresa_uuid == empresa_uuid
+        )
+    )
+
+    cajas = q.scalars().all()
+
+    return [
+        {
+            "id": str(c.id),
+            "empresa_uuid": c.empresa_uuid,
+            "nombre": c.nombre,
+            "activa": c.activa,
+            "sync_status": c.sync_status,
+            "deleted_at":
+                c.deleted_at.isoformat()
+                if c.deleted_at else None,
+            "updated_at":
+                c.updated_at.isoformat()
+                if c.updated_at else None,
+            "version": c.version,
+            "created_at":
+                c.created_at.isoformat()
+                if c.created_at else None
+        }
+        for c in cajas
+    ]
+    
+@app.get("/restore/roles/changes")
+async def restore_roles_changes(
+    empresa_uuid: str,
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(Rol)
+        .where(Rol.empresa_uuid == empresa_uuid)
+        .order_by(Rol.updated_at.asc())
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    roles = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(r.id),
+
+                "empresa_uuid":
+                    r.empresa_uuid,
+
+                "nombre":
+                    r.nombre,
+
+                "descripcion":
+                    r.descripcion,
+
+                "sync_status":
+                    r.sync_status,
+
+                "version":
+                    r.version,
+
+                "updated_at":
+                    r.updated_at.isoformat()
+                    if r.updated_at
+                    else None,
+
+                "created_at":
+                    r.created_at.isoformat()
+                    if r.created_at
+                    else None,
+
+                "deleted_at":
+                    r.deleted_at.isoformat()
+                    if r.deleted_at
+                    else None
+            }
+            for r in roles
+        ],
+        "has_more": len(roles) == limit
+    }
+    
+@app.get("/restore/cajas/changes")
+async def restore_cajas_changes(
+    empresa_uuid: str,
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(Caja)
+        .where(
+            Caja.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            Caja.updated_at.asc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    cajas = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(c.id),
+
+                "empresa_uuid":
+                    c.empresa_uuid,
+
+                "caja_config_id":
+                    str(c.caja_config_id),
+
+                "numero_sesion":
+                    int(c.numero_sesion)
+                    if c.numero_sesion is not None
+                    else None,
+
+                "usuario_id":
+                    str(c.usuario_id),
+
+                "monto_inicial":
+                    float(c.monto_inicial or 0),
+
+                "monto_contado":
+                    float(c.monto_contado)
+                    if c.monto_contado is not None
+                    else None,
+
+                "diferencia":
+                    float(c.diferencia)
+                    if c.diferencia is not None
+                    else None,
+
+                "observacion":
+                    c.observacion,
+
+                "motivo_cierre":
+                    c.motivo_cierre,
+
+                "tipo_cierre":
+                    c.tipo_cierre,
+
+                "cerrada_por":
+                    str(c.cerrada_por)
+                    if c.cerrada_por
+                    else None,
+
+                "estado":
+                    c.estado,
+
+                "sync_status":
+                    c.sync_status,
+
+                "version":
+                    c.version,
+
+                "fecha_apertura":
+                    c.fecha_apertura.isoformat()
+                    if c.fecha_apertura
+                    else None,
+
+                "fecha_cierre":
+                    c.fecha_cierre.isoformat()
+                    if c.fecha_cierre
+                    else None,
+
+                "updated_at":
+                    c.updated_at.isoformat()
+                    if c.updated_at
+                    else None,
+
+                "created_at":
+                    c.created_at.isoformat()
+                    if c.created_at
+                    else None
+            }
+            for c in cajas
+        ],
+        "has_more": len(cajas) == limit
+    }
+    
+@app.get("/restore/rol-permisos/changes")
+async def restore_rol_permisos_changes(
+    empresa_uuid: str,
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(RolPermiso)
+        .where(
+            RolPermiso.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            RolPermiso.updated_at.asc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    rol_permisos = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "empresa_uuid":
+                    rp.empresa_uuid,
+
+                "rol_id":
+                    str(rp.rol_id),
+
+                "permiso_id":
+                    str(rp.permiso_id),
+
+                "sync_status":
+                    rp.sync_status,
+
+                "version":
+                    rp.version,
+
+                "updated_at":
+                    rp.updated_at.isoformat()
+                    if rp.updated_at
+                    else None,
+
+                "created_at":
+                    rp.created_at.isoformat()
+                    if rp.created_at
+                    else None,
+
+                "deleted_at":
+                    rp.deleted_at.isoformat()
+                    if rp.deleted_at
+                    else None
+            }
+            for rp in rol_permisos
+        ],
+        "has_more": len(rol_permisos) == limit
+    }
+    
+@app.get("/restore/usuario-roles/changes")
+async def restore_usuario_roles_changes(
+    empresa_uuid: str,
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(UsuarioRol)
+        .where(
+            UsuarioRol.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            UsuarioRol.updated_at.asc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    usuario_roles = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "usuario_id":
+                    str(ur.usuario_id),
+
+                "rol_id":
+                    str(ur.rol_id),
+
+                "empresa_uuid":
+                    str(ur.empresa_uuid),
+
+                "sync_status":
+                    ur.sync_status,
+
+                "version":
+                    ur.version,
+
+                "updated_at":
+                    ur.updated_at.isoformat()
+                    if ur.updated_at
+                    else None,
+
+                "created_at":
+                    ur.created_at.isoformat()
+                    if ur.created_at
+                    else None,
+
+                "deleted_at":
+                    ur.deleted_at.isoformat()
+                    if ur.deleted_at
+                    else None
+            }
+            for ur in usuario_roles
+        ],
+        "has_more": len(usuario_roles) == limit
+    }
+    
+@app.get("/restore/caja_movimientos/changes")
+async def restore_caja_movimientos_changes(
+    empresa_uuid: str,
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(CajaMovimiento)
+        .where(
+            CajaMovimiento.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            CajaMovimiento.updated_at.asc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    movimientos = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(m.id),
+
+                "empresa_uuid":
+                    m.empresa_uuid,
+
+                "caja_id":
+                    str(m.caja_id)
+                    if m.caja_id
+                    else None,
+
+                "usuario_id":
+                    str(m.usuario_id)
+                    if m.usuario_id
+                    else None,
+
+                "venta_id":
+                    str(m.venta_id)
+                    if m.venta_id
+                    else None,
+
+                "tipo":
+                    m.tipo,
+
+                "monto":
+                    float(m.monto or 0),
+
+                "descripcion":
+                    m.descripcion,
+
+                "solicitado_por":
+                    str(m.solicitado_por)
+                    if m.solicitado_por
+                    else None,
+
+                "autorizado_por":
+                    str(m.autorizado_por)
+                    if m.autorizado_por
+                    else None,
+
+                "requiere_autorizacion":
+                    m.requiere_autorizacion,
+
+                "estado_autorizacion":
+                    m.estado_autorizacion,
+
+                "fecha_autorizacion":
+                    m.fecha_autorizacion.isoformat()
+                    if m.fecha_autorizacion
+                    else None,
+
+                "sync_status":
+                    m.sync_status,
+
+                "updated_at":
+                    m.updated_at.isoformat()
+                    if m.updated_at
+                    else None,
+
+                "created_at":
+                    m.created_at.isoformat()
+                    if m.created_at
+                    else None
+            }
+            for m in movimientos
+        ],
+        "has_more": len(movimientos) == limit
+    }
+    
+@app.get("/restore/productos/changes")
+async def restore_productos_changes(
+    empresa_uuid: str,
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(Producto)
+        .where(
+            Producto.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            Producto.updated_at.asc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    productos = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(p.id),
+
+                "empresa_uuid":
+                    p.empresa_uuid,
+
+                "codigo_barras":
+                    p.codigo_barras,
+
+                "codigo_balanza":
+                    p.codigo_balanza,
+
+                "codigo_interno":
+                    p.codigo_interno,
+
+                "es_balanza":
+                    p.es_balanza,
+
+                "nombre":
+                    p.nombre,
+
+                "precio":
+                    float(p.precio or 0),
+
+                "costo":
+                    float(p.costo or 0),
+
+                "stock":
+                    float(p.stock or 0),
+
+                "stock_minimo":
+                    float(p.stock_minimo or 0),
+
+                "itbis":
+                    float(p.itbis or 0),
+
+                "unidad_id":
+                    str(p.unidad_id)
+                    if p.unidad_id
+                    else None,
+
+                "activo":
+                    p.activo,
+
+                "sync_status":
+                    p.sync_status,
+
+                "version":
+                    p.version,
+
+                "updated_at":
+                    p.updated_at.isoformat()
+                    if p.updated_at
+                    else None,
+
+                "created_at":
+                    p.created_at.isoformat()
+                    if p.created_at
+                    else None,
+
+                "deleted_at":
+                    p.deleted_at.isoformat()
+                    if p.deleted_at
+                    else None
+            }
+            for p in productos
+        ],
+        "has_more": len(productos) == limit
+    }
+    
+@app.get("/restore/unidades_medida/changes")
+async def restore_unidades_medida_changes(
+    empresa_uuid: str,
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(UnidadMedida)
+        .where(
+            UnidadMedida.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            UnidadMedida.updated_at.asc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    unidades = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(u.id),
+
+                "empresa_uuid":
+                    u.empresa_uuid,
+
+                "nombre":
+                    u.nombre,
+
+                "plural":
+                    u.plural,
+
+                "permitir_decimal":
+                    u.permitir_decimal,
+
+                "sync_status":
+                    u.sync_status,
+
+                "version":
+                    u.version,
+
+                "updated_at":
+                    u.updated_at.isoformat()
+                    if u.updated_at
+                    else None,
+
+                "created_at":
+                    u.created_at.isoformat()
+                    if u.created_at
+                    else None,
+
+                "deleted_at":
+                    u.deleted_at.isoformat()
+                    if u.deleted_at
+                    else None
+            }
+            for u in unidades
+        ],
+        "has_more": len(unidades) == limit
+    }

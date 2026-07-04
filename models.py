@@ -1214,7 +1214,58 @@ class Producto(Base):
         nullable=False
     )
     
+class MetodoPago(Base):
 
+    __tablename__ = "metodos_pago"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        index=True
+    )
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        String(36),
+        nullable=False,
+        index=True
+    )
+
+    nombre: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False
+    )
+
+    activo: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true")
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="pending",
+        server_default=text("'pending'")
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1")
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False
+    )
+
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
     
 """ WEB PAGINA """
 
