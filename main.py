@@ -31,6 +31,7 @@ from dateutil import parser
 from passlib.context import CryptContext
 import random
 from zoneinfo import ZoneInfo
+from fastapi import WebSocket, WebSocketDisconnect
 
 
 pwd_context = CryptContext(
@@ -6687,4 +6688,109 @@ async def generate_token_tmp(body: TokenTmpRequest):
     return {
         "ok": True,
         "token_tmp": token_tmp
+    }
+    
+""" WEBSCOKER """
+
+clientes_ws = {}
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+
+    await websocket.accept()
+
+    empresa_uuid = websocket.query_params.get("empresa_uuid")
+
+    if not empresa_uuid:
+        await websocket.close(code=1008)
+        return
+
+    if empresa_uuid not in clientes_ws:
+        clientes_ws[empresa_uuid] = set()
+
+    clientes_ws[empresa_uuid].add(websocket)
+
+    print(
+        f"WebSocket conectado: {empresa_uuid}"
+    )
+
+    try:
+
+        while True:
+
+            mensaje = await websocket.receive_json()
+
+            print(
+                "Evento WebSocket recibido:",
+                mensaje
+            )
+
+            for cliente in clientes_ws.get(
+                empresa_uuid,
+                set()
+            ).copy():
+
+                if cliente == websocket:
+                    continue
+
+                try:
+
+                    await cliente.send_json(
+                        mensaje
+                    )
+
+                except Exception:
+
+                    clientes_ws[
+                        empresa_uuid
+                    ].discard(cliente)
+
+    except WebSocketDisconnect:
+
+        clientes_ws[
+            empresa_uuid
+        ].discard(websocket)
+
+        if not clientes_ws[
+            empresa_uuid
+        ]:
+
+            del clientes_ws[
+                empresa_uuid
+            ]
+
+        print(
+            f"WebSocket desconectado: {empresa_uuid}"
+        )
+        
+async def enviar_evento(evento):
+
+    desconectados = set()
+
+    for websocket in clientes_ws:
+
+        try:
+
+            await websocket.send_json(evento)
+
+        except Exception:
+
+            desconectados.add(websocket)
+
+    for websocket in desconectados:
+
+        clientes_ws.discard(websocket)
+        
+@app.post("/test-websocket")
+async def test_websocket():
+
+    await enviar_evento({
+        "tipo": "compra_actualizada",
+        "accion": "creada",
+        "compra_id": "123"
+    })
+
+    return {
+        "ok": True
     }
