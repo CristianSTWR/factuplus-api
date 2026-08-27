@@ -2687,6 +2687,8 @@ async def sync_batch(
                     await db.flush()
                     
             elif item_type == "actualizar_rol_nivel":
+                
+                print(item_type)
 
                 rol_id = UUID(payload["id"])
 
