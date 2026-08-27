@@ -73,7 +73,8 @@ from urllib.parse import urlparse, parse_qs
 import httpx
 import re
 # APLICACION
-from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, Producto, UnidadMedida, Rol, RolPermiso, UsuarioRol, MetodoPago
+from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, Producto, UnidadMedida, Rol, RolPermiso, UsuarioRol, MetodoPago, Cliente, Suplidor
+from models import Compra, CompraDetalle
 
 # WEB
 from models import ListaEspera, EmpresaDispositivo
@@ -2060,6 +2061,7 @@ async def sync_batch(
                     )
 
                     db.add(company)
+                
                     
             elif item_type == "actualizar_empresa":
 
@@ -2612,6 +2614,10 @@ async def sync_batch(
                             "version",
                             1
                         ),
+                        nivel=payload.get(
+                            "nivel",
+                            1
+                        ),
                         sync_status="synced",
                         created_at=(
                             parse_datetime(
@@ -2677,6 +2683,37 @@ async def sync_batch(
                     )
 
                     db.add(rol_permiso)
+
+                    await db.flush()
+                    
+            elif item_type == "actualizar_rol_nivel":
+
+                rol_id = UUID(payload["id"])
+
+                q = await db.execute(
+                    select(Rol).where(
+                        Rol.id == rol_id,
+                        Rol.empresa_uuid == payload["empresa_uuid"]
+                    )
+                )
+
+                rol = q.scalar_one_or_none()
+
+                if rol:
+
+                    rol.nivel = int(payload["nivel"])
+
+                    rol.updated_at = (
+                        parse_datetime(payload["updated_at"])
+                        if payload.get("updated_at")
+                        else rol.updated_at
+                    )
+
+                    rol.sync_status = "synced"
+
+                    rol.version = int(
+                        payload.get("version", rol.version or 1)
+                    )
 
                     await db.flush()
                     
@@ -2752,7 +2789,46 @@ async def sync_batch(
 
                     db.add(usuario_rol)
 
-                    await db.flush()      
+                    await db.flush()  
+                    
+            elif item_type == "eliminar_rol":
+
+                rol_id = UUID(payload["id"])
+
+                q = await db.execute(
+                    select(Rol).where(
+                        Rol.id == rol_id,
+                        Rol.empresa_uuid == payload["empresa_uuid"]
+                    )
+                )
+
+                rol = q.scalar_one_or_none()
+
+                if rol:
+
+                    rol.deleted_at = (
+                        parse_datetime(payload.get("deleted_at"))
+                        if payload.get("deleted_at")
+                        else datetime.utcnow()
+                    )
+
+                    rol.sync_status = "synced"
+
+                    incoming_version = payload.get(
+                        "version",
+                        rol.version + 1
+                    )
+
+                    if incoming_version > rol.version:
+                        rol.version = incoming_version
+
+                    rol.updated_at = (
+                        parse_datetime(payload.get("updated_at"))
+                        if payload.get("updated_at")
+                        else datetime.utcnow()
+                    )
+
+                    await db.flush()    
             
                
                     
@@ -2804,6 +2880,59 @@ async def sync_batch(
 
                     await db.flush()
                     
+            elif item_type == "actualizar_cliente":
+
+                cliente_id = payload["id"]
+
+                q = await db.execute(
+                    select(Cliente).where(
+                        Cliente.id == cliente_id,
+                        Cliente.empresa_uuid == payload.get("empresa_uuid")
+                    )
+                )
+
+                cliente = q.scalar_one_or_none()
+
+                if cliente:
+
+                    incoming_version = payload.get("version", 1)
+
+                    if incoming_version > cliente.version:
+
+                        cliente.nombre = payload.get("nombre")
+                        cliente.documento = payload.get("documento")
+                        cliente.telefono = payload.get("telefono")
+                        cliente.email = payload.get("email")
+                        cliente.direccion = payload.get("direccion")
+                        cliente.ciudad = payload.get("ciudad")
+                        cliente.sector = payload.get("sector")
+                        cliente.limite_credito = payload.get(
+                            "limite_credito",
+                            0
+                        )
+
+                        cliente.sync_status = payload.get(
+                            "sync_status",
+                            "synced"
+                        )
+
+                        cliente.deleted_at = payload.get(
+                            "deleted_at"
+                        )
+
+                        cliente.version = incoming_version
+
+                        cliente.updated_at = (
+                            parse_datetime(
+                                payload.get("updated_at")
+                            )
+                            if payload.get("updated_at")
+                            else None
+                        )
+
+                        await db.commit()
+                        await db.refresh(cliente)
+                                
             elif item_type == "actualizar_producto":
 
                 producto_id = payload["id"]
@@ -2853,6 +2982,320 @@ async def sync_batch(
 
                         await db.commit()
                         await db.refresh(producto)
+                        
+            elif item_type == "crear_cliente":
+
+                cliente_id = UUID(payload["id"])
+
+                q = await db.execute(
+                    select(Cliente).where(
+                        Cliente.id == cliente_id,
+                        Cliente.empresa_uuid == payload["empresa_uuid"]
+                    )
+                )
+
+                cliente = q.scalar_one_or_none()
+
+                if not cliente:
+
+                    cliente = Cliente(
+                        id=cliente_id,
+                        empresa_uuid=payload["empresa_uuid"],
+                        codigo=payload.get("codigo"),
+                        nombre=payload["nombre"],
+                        telefono=payload.get("telefono"),
+                        email=payload.get("email"),
+                        direccion=payload.get("direccion"),
+                        ciudad=payload.get("ciudad"),
+                        sector=payload.get("sector"),
+                        documento=payload.get("documento"),
+                        limite_credito=payload.get("limite_credito", 0),
+                        balance=payload.get("balance", 0),
+                        estado_credito=payload.get("estado_credito", "al_dia"),
+                        activo=payload.get("activo", True),
+                        version=payload.get("version", 1),
+                        sync_status="synced",
+                        created_at=(
+                            parse_datetime(payload["created_at"])
+                            if payload.get("created_at")
+                            else None
+                        ),
+                        updated_at=(
+                            parse_datetime(payload["updated_at"])
+                            if payload.get("updated_at")
+                            else None
+                        ),
+                        deleted_at=(
+                            parse_datetime(payload["deleted_at"])
+                            if payload.get("deleted_at")
+                            else None
+                        )
+                    )
+
+                    db.add(cliente)
+
+                    await db.flush()
+                    
+            
+                    
+            elif item_type == "eliminar_cliente":
+
+                cliente_id = UUID(payload["id"])
+
+                q = await db.execute(
+                    select(Cliente).where(
+                        Cliente.id == cliente_id,
+                        Cliente.empresa_uuid == payload["empresa_uuid"]
+                    )
+                )
+
+                cliente = q.scalar_one_or_none()
+
+                if cliente:
+
+                    cliente.deleted_at = datetime.utcnow()
+                    cliente.activo = False
+                    cliente.sync_status = "synced"
+                    cliente.version += 1
+                    cliente.updated_at = datetime.utcnow()
+
+                    await db.flush()
+                    
+            elif item_type == "crear_suplidor":
+
+                suplidor_id = UUID(payload["id"])
+
+                q = await db.execute(
+                    select(Suplidor).where(
+                        Suplidor.id == suplidor_id,
+                        Suplidor.empresa_uuid == payload["empresa_uuid"]
+                    )
+                )
+
+                suplidor = q.scalar_one_or_none()
+
+                if not suplidor:
+
+                    suplidor = Suplidor(
+                        id=suplidor_id,
+                        empresa_uuid=payload.get("empresa_uuid"),
+                        numero_suplidor=int(payload["numero_suplidor"]),
+                        nombre=payload["nombre"],
+                        rnc=payload.get("rnc"),
+                        contacto=payload.get("contacto"),
+                        correo=payload.get("correo"),
+                        telefono=payload.get("telefono"),
+                        direccion=payload.get("direccion"),
+                        activo=payload.get("activo", True),
+                        created_at=(
+                            parse_datetime(payload["created_at"])
+                            if payload.get("created_at")
+                            else None
+                        ),
+                        updated_at=(
+                            parse_datetime(payload["updated_at"])
+                            if payload.get("updated_at")
+                            else None
+                        ),
+                        deleted_at=(
+                            parse_datetime(payload["deleted_at"])
+                            if payload.get("deleted_at")
+                            else None
+                        ),
+                        sync_status="synced",
+                        version=int(payload.get("version", 1))
+                    )
+
+                    db.add(suplidor)
+
+                    await db.flush()
+                    
+            elif item_type == "actualizar_suplidor":
+
+                suplidor_id = payload["id"]
+
+                q = await db.execute(
+                    select(Suplidor).where(
+                        Suplidor.id == suplidor_id,
+                        Suplidor.empresa_uuid == payload.get("empresa_uuid")
+                    )
+                )
+
+                suplidor = q.scalar_one_or_none()
+
+                if suplidor:
+
+                    incoming_version = payload.get("version", 1)
+
+                    if incoming_version > suplidor.version:
+
+                        suplidor.nombre = payload.get("nombre")
+                        suplidor.rnc = payload.get("rnc")
+                        suplidor.contacto = payload.get("contacto")
+                        suplidor.correo = payload.get("correo")
+                        suplidor.telefono = payload.get("telefono")
+                        suplidor.direccion = payload.get("direccion")
+
+                        suplidor.activo = payload.get(
+                            "activo",
+                            True
+                        )
+
+                        suplidor.sync_status = payload.get(
+                            "sync_status",
+                            "synced"
+                        )
+
+                        suplidor.deleted_at = payload.get(
+                            "deleted_at"
+                        )
+
+                        suplidor.version = incoming_version
+
+                        suplidor.updated_at = (
+                            parse_datetime(
+                                payload.get("updated_at")
+                            )
+                            if payload.get("updated_at")
+                            else None
+                        )
+
+                        await db.commit()
+                        await db.refresh(suplidor)
+                    
+            elif item_type == "eliminar_suplidor":
+
+                suplidor_id = UUID(payload["id"])
+
+                q = await db.execute(
+                    select(Suplidor).where(
+                        Suplidor.id == suplidor_id,
+                        Suplidor.empresa_uuid == payload["empresa_uuid"]
+                    )
+                )
+
+                suplidor = q.scalar_one_or_none()
+
+                if suplidor:
+
+                    suplidor.deleted_at = (
+                        parse_datetime(payload.get("deleted_at"))
+                        if payload.get("deleted_at")
+                        else datetime.utcnow()
+                    )
+
+                    suplidor.activo = False
+                    suplidor.sync_status = "synced"
+
+                    incoming_version = payload.get(
+                        "version",
+                        suplidor.version + 1
+                    )
+
+                    if incoming_version > suplidor.version:
+                        suplidor.version = incoming_version
+
+                    suplidor.updated_at = (
+                        parse_datetime(payload.get("updated_at"))
+                        if payload.get("updated_at")
+                        else datetime.utcnow()
+                    )
+
+                    await db.flush()
+                    
+            elif item_type == "crear_compra":
+
+                compra_id = UUID(payload["id"])
+
+                q = await db.execute(
+                    select(Compra).where(
+                        Compra.id == compra_id,
+                        Compra.empresa_uuid == payload["empresa_uuid"]
+                    )
+                )
+
+                compra = q.scalar_one_or_none()
+
+                if not compra:
+
+                    compra = Compra(
+                        id=compra_id,
+                        empresa_uuid=payload.get("empresa_uuid"),
+                        numero_compra=int(payload["numero_compra"]),
+                        suplidor_id=UUID(payload["suplidor_id"]),
+                        usuario_id=(
+                            UUID(payload["usuario_id"])
+                            if payload.get("usuario_id")
+                            else None
+                        ),
+                        numero_factura=payload.get("numero_factura"),
+                        subtotal=payload.get("subtotal", 0),
+                        descuento=payload.get("descuento", 0),
+                        itbis=payload.get("itbis", 0),
+                        total=payload.get("total", 0),
+                        created_at=(
+                            parse_datetime(payload["created_at"])
+                            if payload.get("created_at")
+                            else None
+                        ),
+                        updated_at=(
+                            parse_datetime(payload["updated_at"])
+                            if payload.get("updated_at")
+                            else None
+                        ),
+                        deleted_at=(
+                            parse_datetime(payload["deleted_at"])
+                            if payload.get("deleted_at")
+                            else None
+                        ),
+                        sync_status="synced",
+                        version=int(payload.get("version", 1))
+                    )
+
+                    db.add(compra)
+
+                    await db.flush()
+
+                    for detalle in payload.get("detalles", []):
+
+                        detalle_id = UUID(detalle["id"])
+
+                        q_detalle = await db.execute(
+                            select(CompraDetalle).where(
+                                CompraDetalle.id == detalle_id,
+                                CompraDetalle.empresa_uuid == payload["empresa_uuid"]
+                            )
+                        )
+
+                        compra_detalle = q_detalle.scalar_one_or_none()
+
+                        if not compra_detalle:
+
+                            compra_detalle = CompraDetalle(
+                                id=detalle_id,
+                                empresa_uuid=payload["empresa_uuid"],
+                                compra_id=compra_id,
+                                producto_id=UUID(detalle["producto_id"]),
+                                cantidad=detalle.get("cantidad", 0),
+                                costo_unitario=detalle.get("costo_unitario", 0),
+                                subtotal=detalle.get("subtotal", 0),
+                                created_at=(
+                                    parse_datetime(detalle["created_at"])
+                                    if detalle.get("created_at")
+                                    else None
+                                ),
+                                updated_at=(
+                                    parse_datetime(detalle["updated_at"])
+                                    if detalle.get("updated_at")
+                                    else None
+                                ),
+                                sync_status="synced",
+                                version=int(detalle.get("version", 1))
+                            )
+
+                            db.add(compra_detalle)
+
+                            await db.flush()
                     
                  
             
@@ -3628,6 +4071,9 @@ async def roles_changes(
                 "sync_status":
                     r.sync_status,
 
+                "nivel":
+                    r.nivel,
+                    
                 "version":
                     r.version,
 
@@ -3833,6 +4279,374 @@ async def rol_permisos_changes(
         "has_more": len(rol_permisos) == limit
     }
 
+@app.get("/sync/metodos-pago/changes")
+async def metodos_pago_changes(
+    empresa_uuid: str,
+    since: str | None = None,
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(MetodoPago).where(
+        MetodoPago.empresa_uuid == empresa_uuid
+    )
+
+    if since:
+
+        since_dt = parser.isoparse(since)
+
+        if since_dt.tzinfo:
+            since_dt = since_dt.replace(
+                tzinfo=None
+            )
+
+        query = query.where(
+            MetodoPago.updated_at > since_dt
+        )
+
+    query = query.order_by(
+        MetodoPago.updated_at.asc()
+    )
+
+    query = query.limit(limit).offset(offset)
+
+    result = await db.execute(query)
+
+    metodos_pago = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id":
+                    str(mp.id),
+
+                "empresa_uuid":
+                    str(mp.empresa_uuid),
+
+                "nombre":
+                    mp.nombre,
+
+                "activo":
+                    mp.activo,
+
+                "sync_status":
+                    mp.sync_status,
+
+                "version":
+                    mp.version,
+
+                "updated_at":
+                    mp.updated_at.isoformat()
+                    if mp.updated_at
+                    else None,
+
+                "created_at":
+                    mp.created_at.isoformat()
+                    if mp.created_at
+                    else None
+            }
+            for mp in metodos_pago
+        ],
+        "has_more": len(metodos_pago) == limit
+    }
+    
+@app.get("/sync/clientes/changes")
+async def clientes_changes(
+    authorization: str = Header(None),
+
+    empresa_uuid: str | None = None,
+    since: str | None = None,
+
+    db: AsyncSession = Depends(get_db)
+):
+
+
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(Cliente).where(
+        Cliente.empresa_uuid == empresa_uuid
+    )
+
+    if since:
+
+        since_dt = parser.isoparse(since)
+
+        since_dt = since_dt.replace(
+            tzinfo=None
+        )
+
+        query = query.where(
+            Cliente.updated_at > since_dt
+        )
+
+    q = await db.execute(query)
+
+    clientes = q.scalars().all()
+
+    if not clientes:
+        return []
+
+    return [
+        {
+            "id": cliente.id,
+            "codigo": cliente.codigo,
+            "nombre": cliente.nombre,
+            "telefono": cliente.telefono,
+            "email": cliente.email,
+            "direccion": cliente.direccion,
+            "ciudad": cliente.ciudad,
+            "sector": cliente.sector,
+            "documento": cliente.documento,
+            "limite_credito": cliente.limite_credito,
+            "balance": cliente.balance,
+            "estado_credito": cliente.estado_credito,
+            "activo": cliente.activo,
+            "empresa_uuid": cliente.empresa_uuid,
+            "sync_status": cliente.sync_status,
+            "version": cliente.version,
+            "created_at":
+                cliente.created_at.isoformat()
+                if cliente.created_at
+                else None,
+            "updated_at":
+                cliente.updated_at.isoformat()
+                if cliente.updated_at
+                else None,
+            "deleted_at":
+                cliente.deleted_at.isoformat()
+                if cliente.deleted_at
+                else None
+        }
+        for cliente in clientes
+    ]
+
+@app.get("/sync/suplidores/changes")
+async def suplidores_changes(
+    authorization: str = Header(None),
+
+    empresa_uuid: str | None = None,
+    since: str | None = None,
+
+    db: AsyncSession = Depends(get_db)
+):
+
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(Suplidor).where(
+        Suplidor.empresa_uuid == empresa_uuid
+    )
+
+    if since:
+
+        since_dt = parser.isoparse(since)
+
+        since_dt = since_dt.replace(
+            tzinfo=None
+        )
+
+        query = query.where(
+            Suplidor.updated_at > since_dt
+        )
+
+    q = await db.execute(query)
+
+    suplidores = q.scalars().all()
+
+    if not suplidores:
+        return []
+
+    return [
+        {
+            "id": suplidor.id,
+            "empresa_uuid": suplidor.empresa_uuid,
+            "numero_suplidor": suplidor.numero_suplidor,
+            "nombre": suplidor.nombre,
+            "rnc": suplidor.rnc,
+            "contacto": suplidor.contacto,
+            "correo": suplidor.correo,
+            "telefono": suplidor.telefono,
+            "direccion": suplidor.direccion,
+            "activo": suplidor.activo,
+            "created_at":
+                suplidor.created_at.isoformat()
+                if suplidor.created_at
+                else None,
+            "updated_at":
+                suplidor.updated_at.isoformat()
+                if suplidor.updated_at
+                else None,
+            "deleted_at":
+                suplidor.deleted_at.isoformat()
+                if suplidor.deleted_at
+                else None,
+            "sync_status": suplidor.sync_status,
+            "version": suplidor.version
+        }
+        for suplidor in suplidores
+    ]
+
+@app.get("/sync/compras/changes")
+async def compras_changes(
+    authorization: str = Header(None),
+
+    empresa_uuid: str | None = None,
+    since: str | None = None,
+
+    db: AsyncSession = Depends(get_db)
+):
+
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(Compra).where(
+        Compra.empresa_uuid == empresa_uuid
+    )
+
+    if since:
+
+        since_dt = parser.isoparse(since)
+
+        since_dt = since_dt.replace(
+            tzinfo=None
+        )
+
+        query = query.where(
+            Compra.updated_at > since_dt
+        )
+
+    q = await db.execute(query)
+
+    compras = q.scalars().all()
+
+    if not compras:
+        return []
+
+    resultado = []
+
+    for compra in compras:
+
+        detalle_query = select(CompraDetalle).where(
+            CompraDetalle.compra_id == compra.id,
+            CompraDetalle.empresa_uuid == empresa_uuid
+        )
+
+        detalle_q = await db.execute(
+            detalle_query
+        )
+
+        detalles = detalle_q.scalars().all()
+
+        resultado.append({
+            "id": compra.id,
+            "empresa_uuid": compra.empresa_uuid,
+            "numero_compra": compra.numero_compra,
+            "suplidor_id": compra.suplidor_id,
+            "usuario_id": compra.usuario_id,
+            "numero_factura": compra.numero_factura,
+            "subtotal": compra.subtotal,
+            "descuento": compra.descuento,
+            "itbis": compra.itbis,
+            "total": compra.total,
+            "created_at":
+                compra.created_at.isoformat()
+                if compra.created_at
+                else None,
+            "updated_at":
+                compra.updated_at.isoformat()
+                if compra.updated_at
+                else None,
+            "deleted_at":
+                compra.deleted_at.isoformat()
+                if compra.deleted_at
+                else None,
+            "sync_status": compra.sync_status,
+            "version": compra.version,
+
+            "detalles": [
+                {
+                    "id": detalle.id,
+                    "empresa_uuid": detalle.empresa_uuid,
+                    "compra_id": detalle.compra_id,
+                    "producto_id": detalle.producto_id,
+                    "cantidad": detalle.cantidad,
+                    "costo_unitario": detalle.costo_unitario,
+                    "subtotal": detalle.subtotal,
+                    "created_at":
+                        detalle.created_at.isoformat()
+                        if detalle.created_at
+                        else None,
+                    "updated_at":
+                        detalle.updated_at.isoformat()
+                        if detalle.updated_at
+                        else None,
+                    "sync_status": detalle.sync_status,
+                    "version": detalle.version
+                }
+                for detalle in detalles
+            ]
+        })
+
+    return resultado
+
 @app.post("/registrar-users")
 async def register_user(
     payload: dict,
@@ -3840,74 +4654,48 @@ async def register_user(
 ):
     try:
 
-        nombre = str(
-            payload.get("nombre", "")
-        ).strip()
+        print("PAYLOAD RECIBIDO:", payload)
 
-        usuario = str(
-            payload.get("usuario", "")
-        ).strip()
-
-        contraseña = str(
-            payload.get("contraseña", "")
-        ).strip()
-
-        empresa_uuid = str(
-            payload.get(
-                "empresa_uuid",
-                ""
-            )
-        ).strip()
+        nombre = str(payload.get("nombre", "")).strip()
+        usuario = str(payload.get("usuario", "")).strip()
+        contraseña = str(payload.get("contraseña", "")).strip()
+        empresa_uuid = str(payload.get("empresa_uuid", "")).strip()
 
         if not empresa_uuid:
             raise HTTPException(
                 status_code=400,
                 detail="Empresa requerida"
             )
-            
+
         empresa = await db.execute(
             select(Company).where(
                 Company.uuid == empresa_uuid
             )
         )
 
-        empresa_obj = (
-            empresa.scalar_one_or_none()
-        )
+        empresa_obj = empresa.scalar_one_or_none()
 
         if not empresa_obj:
             raise HTTPException(
                 status_code=404,
                 detail="La empresa no existe"
             )
-    
+
         total_users = await db.execute(
-            select(func.count(User.id))
-            .where(
+            select(func.count(User.id)).where(
                 User.empresa_uuid == empresa_uuid
             )
         )
 
-        cantidad_usuarios = (
-            total_users.scalar() or 0
-        )
+        cantidad_usuarios = total_users.scalar() or 0
 
-        print(
-            f"USUARIOS EMPRESA {empresa_uuid}:",
-            cantidad_usuarios
-        )
-
-        # Si ya existe al menos un usuario
-        # exigir api_key
+        print("Cantidad usuarios:", cantidad_usuarios)
 
         if cantidad_usuarios > 0:
 
-            token = str(
-                payload.get(
-                    "token",
-                    ""
-                )
-            ).strip()
+            token = str(payload.get("token", "")).strip()
+
+            print("TOKEN:", token)
 
             if not token:
                 raise HTTPException(
@@ -3920,10 +4708,7 @@ async def register_user(
                 db
             )
 
-            if (
-                usuario_actual.empresa_uuid
-                != empresa_uuid
-            ):
+            if usuario_actual.empresa_uuid != empresa_uuid:
                 raise HTTPException(
                     status_code=403,
                     detail="La empresa no coincide"
@@ -3932,11 +4717,10 @@ async def register_user(
         else:
 
             token_tmp = str(
-                payload.get(
-                    "token_tmp",
-                    ""
-                )
+                payload.get("token_tmp", "")
             ).strip()
+
+            print("TOKEN TEMPORAL:", token_tmp)
 
             if not token_tmp:
                 raise HTTPException(
@@ -3945,14 +4729,25 @@ async def register_user(
                 )
 
             try:
-
-                jwt.decode(
+                data = jwt.decode(
                     token_tmp,
                     JWT_SECRET,
                     algorithms=[JWT_ALGORITHM]
                 )
 
-            except Exception:
+                print("JWT TEMPORAL:", data)
+
+                if data.get("empresa_uuid") != empresa_uuid:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="La empresa no coincide"
+                    )
+
+            except HTTPException:
+                raise
+
+            except Exception as e:
+                print("JWT ERROR:", e)
 
                 raise HTTPException(
                     status_code=401,
@@ -3993,10 +4788,7 @@ async def register_user(
         while True:
 
             codigo = str(
-                random.randint(
-                    10000,
-                    99999
-                )
+                random.randint(10000, 99999)
             )
 
             existe_codigo = await db.execute(
@@ -4008,14 +4800,8 @@ async def register_user(
 
             if not existe_codigo.scalar_one_or_none():
                 break
-            
-        print("CONTRASEÑA:", contraseña)
-        print("TIPO:", type(contraseña))
-        print("LARGO:", len(contraseña))
 
-        password_hash = pwd_context.hash(
-            contraseña
-        )
+        password_hash = pwd_context.hash(contraseña)
 
         nuevo_usuario = User(
             empresa_uuid=empresa_uuid,
@@ -4032,40 +4818,21 @@ async def register_user(
         db.add(nuevo_usuario)
 
         await db.commit()
-
-        await db.refresh(
-            nuevo_usuario
-        )
+        await db.refresh(nuevo_usuario)
 
         return {
             "ok": True,
-            "id": str(
-                nuevo_usuario.id
-            ),
-            "empresa_uuid":
-                nuevo_usuario.empresa_uuid,
-            "nombre":
-                nuevo_usuario.nombre,
-            "usuario":
-                nuevo_usuario.usuario,
-            "codigo":
-                nuevo_usuario.codigo,
-            "activo":
-                nuevo_usuario.activo,
-            "permitir_nube":
-                nuevo_usuario.permitir_nube,
-            "sync_status":
-                nuevo_usuario.sync_status,
-            "version":
-                nuevo_usuario.version,
-            "created_at":
-                nuevo_usuario.created_at.isoformat()
-                if nuevo_usuario.created_at
-                else None,
-            "updated_at":
-                nuevo_usuario.updated_at.isoformat()
-                if nuevo_usuario.updated_at
-                else None
+            "id": str(nuevo_usuario.id),
+            "empresa_uuid": nuevo_usuario.empresa_uuid,
+            "nombre": nuevo_usuario.nombre,
+            "usuario": nuevo_usuario.usuario,
+            "codigo": nuevo_usuario.codigo,
+            "activo": nuevo_usuario.activo,
+            "permitir_nube": nuevo_usuario.permitir_nube,
+            "sync_status": nuevo_usuario.sync_status,
+            "version": nuevo_usuario.version,
+            "created_at": nuevo_usuario.created_at.isoformat() if nuevo_usuario.created_at else None,
+            "updated_at": nuevo_usuario.updated_at.isoformat() if nuevo_usuario.updated_at else None
         }
 
     except HTTPException:
@@ -4073,16 +4840,12 @@ async def register_user(
 
     except Exception as e:
 
-        print(
-            "ERROR REGISTER USER:",
-            str(e)
-        )
+        print("ERROR REGISTER USER:", repr(e))
 
         raise HTTPException(
             status_code=500,
             detail=str(e)
-        )
-        
+        )     
 
 @app.post("/login-user")
 async def login_user(
@@ -5702,7 +6465,7 @@ async def restore_caja_movimientos_changes(
 @app.get("/restore/productos/changes")
 async def restore_productos_changes(
     empresa_uuid: str,
-    limit: int = 5000,
+    limit: int = 1000,
     offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
@@ -5730,7 +6493,7 @@ async def restore_productos_changes(
             Producto.empresa_uuid == empresa_uuid
         )
         .order_by(
-            Producto.updated_at.asc()
+            Producto.updated_at.desc()
         )
         .limit(limit)
         .offset(offset)
@@ -5894,4 +6657,28 @@ async def restore_unidades_medida_changes(
             for u in unidades
         ],
         "has_more": len(unidades) == limit
+    }
+    
+from pydantic import BaseModel
+
+class TokenTmpRequest(BaseModel):
+    empresa_uuid: str
+
+
+@app.post("/generate-token-tmp")
+async def generate_token_tmp(body: TokenTmpRequest):
+
+    token_tmp = jwt.encode(
+        {
+            "empresa_uuid": body.empresa_uuid,
+            "tipo": "create",
+            "exp": datetime.utcnow() + timedelta(minutes=30)
+        },
+        JWT_SECRET,
+        algorithm=JWT_ALGORITHM
+    )
+
+    return {
+        "ok": True,
+        "token_tmp": token_tmp
     }
