@@ -4005,8 +4005,6 @@ async def unidades_medida_changes(
 async def roles_changes(
     empresa_uuid: str,
     since: str | None = None,
-    limit: int = 5000,
-    offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
@@ -4048,55 +4046,49 @@ async def roles_changes(
         Rol.updated_at.asc()
     )
 
-    query = query.limit(limit).offset(offset)
-
     result = await db.execute(query)
 
     roles = result.scalars().all()
 
-    return {
-        "items": [
-            {
-                "id": str(r.id),
+    return [
+        {
+            "id": str(r.id),
 
-                "empresa_uuid":
-                    r.empresa_uuid,
+            "empresa_uuid":
+                r.empresa_uuid,
 
-                "nombre":
-                    r.nombre,
+            "nombre":
+                r.nombre,
 
-                "descripcion":
-                    r.descripcion,
+            "descripcion":
+                r.descripcion,
 
-                "sync_status":
-                    r.sync_status,
+            "sync_status":
+                r.sync_status,
 
-                "nivel":
-                    r.nivel,
-                    
-                "version":
-                    r.version,
+            "nivel":
+                r.nivel,
 
-                "updated_at":
-                    r.updated_at.isoformat()
-                    if r.updated_at
-                    else None,
+            "version":
+                r.version,
 
-                "created_at":
-                    r.created_at.isoformat()
-                    if r.created_at
-                    else None,
+            "updated_at":
+                r.updated_at.isoformat()
+                if r.updated_at
+                else None,
 
-                "deleted_at":
-                    r.deleted_at.isoformat()
-                    if r.deleted_at
-                    else None
-            }
-            for r in roles
-        ],
-        "has_more": len(roles) == limit
-    }
+            "created_at":
+                r.created_at.isoformat()
+                if r.created_at
+                else None,
 
+            "deleted_at":
+                r.deleted_at.isoformat()
+                if r.deleted_at
+                else None
+        }
+        for r in roles
+    ]
 @app.get("/sync/usuario-roles/changes")
 async def usuario_roles_changes(
     empresa_uuid: str,
