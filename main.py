@@ -2997,6 +2997,12 @@ async def sync_batch(
                             else None
                         )
                         
+                        print(
+                            "🔥 PRODUCTO ACTUALIZADO EN SERVIDOR:",
+                            producto.nombre,
+                            producto.version
+                        )
+                        
                         eventos_ws.append({
                             "tipo": "producto_actualizado",
                             "accion": "actualizado",
@@ -3005,11 +3011,14 @@ async def sync_batch(
                             ),
                             "producto_id": str(
                                 payload["id"]
-                            )
+                            ),
+                            "version": incoming_version
                         })
 
                         await db.commit()
                         await db.refresh(producto)
+                        
+                    
                         
                         
                         
