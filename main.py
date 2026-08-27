@@ -2693,7 +2693,7 @@ async def sync_batch(
                 q = await db.execute(
                     select(Rol).where(
                         Rol.id == rol_id,
-                        Rol.empresa_uuid == payload["empresa_uuid"]
+                        Rol.empresa_uuid == payload.get("empresa_uuid")
                     )
                 )
 
@@ -2701,21 +2701,27 @@ async def sync_batch(
 
                 if rol:
 
-                    rol.nivel = int(payload["nivel"])
+                    incoming_version = payload.get("version", 1)
 
-                    rol.updated_at = (
-                        parse_datetime(payload["updated_at"])
-                        if payload.get("updated_at")
-                        else rol.updated_at
-                    )
+                    if incoming_version > rol.version:
 
-                    rol.sync_status = "synced"
+                        rol.nivel = int(payload["nivel"])
 
-                    rol.version = int(
-                        payload.get("version", rol.version or 1)
-                    )
+                        rol.sync_status = payload.get(
+                            "sync_status",
+                            "synced"
+                        )
 
-                    await db.flush()
+                        rol.deleted_at = payload.get(
+                            "deleted_at"
+                        )
+
+                        rol.version = incoming_version
+
+                        rol.updated_at = datetime.now(timezone.utc)
+
+                        await db.commit()
+                        await db.refresh(rol)
                     
             elif item_type == "crear_metodo_pago":
 
