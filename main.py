@@ -2001,6 +2001,8 @@ async def sync_batch(
             "crear_usuario_rol",
             "crear_metodo_pago"
         }
+        
+        eventos_ws = []
 
         requiere_usuario = any(
             item.get("type") not in tipos_inicializacion
@@ -2994,9 +2996,22 @@ async def sync_batch(
                             if payload.get("updated_at")
                             else None
                         )
+                        
+                        eventos_ws.append({
+                            "tipo": "producto_actualizado",
+                            "accion": "actualizado",
+                            "empresa_uuid": str(
+                                payload["empresa_uuid"]
+                            ),
+                            "producto_id": str(
+                                payload["id"]
+                            )
+                        })
 
                         await db.commit()
                         await db.refresh(producto)
+                        
+                        
                         
             elif item_type == "crear_cliente":
 
