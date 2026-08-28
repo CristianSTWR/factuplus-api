@@ -3364,6 +3364,13 @@ async def sync_batch(
                     db.add(product) """
 
         await db.commit()
+        
+        for evento in eventos_ws:
+
+            await enviar_evento(
+                evento["empresa_uuid"],
+                evento
+            )
 
         return {
             "ok": True
@@ -6715,7 +6722,6 @@ async def generate_token_tmp(body: TokenTmpRequest):
     }
     
 """ WEBSCOKER """
-
 clientes_ws = {}
 
 
@@ -6724,7 +6730,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
     await websocket.accept()
 
-    empresa_uuid = websocket.query_params.get("empresa_uuid")
+    empresa_uuid = websocket.query_params.get(
+        "empresa_uuid"
+    )
 
     if not empresa_uuid:
         await websocket.close(code=1008)
@@ -6743,78 +6751,49 @@ async def websocket_endpoint(websocket: WebSocket):
 
         while True:
 
-            mensaje = await websocket.receive_json()
-
-            print(
-                "Evento WebSocket recibido:",
-                mensaje
-            )
-
-            for cliente in clientes_ws.get(
-                empresa_uuid,
-                set()
-            ).copy():
-
-                if cliente == websocket:
-                    continue
-
-                try:
-
-                    await cliente.send_json(
-                        mensaje
-                    )
-
-                except Exception:
-
-                    clientes_ws[
-                        empresa_uuid
-                    ].discard(cliente)
+            await websocket.receive_text()
 
     except WebSocketDisconnect:
 
-        clientes_ws[
-            empresa_uuid
-        ].discard(websocket)
+        clientes_ws.get(
+            empresa_uuid,
+            set()
+        ).discard(websocket)
 
-        if not clientes_ws[
-            empresa_uuid
-        ]:
-
-            del clientes_ws[
-                empresa_uuid
-            ]
+        if empresa_uuid in clientes_ws and not clientes_ws[empresa_uuid]:
+            del clientes_ws[empresa_uuid]
 
         print(
             f"WebSocket desconectado: {empresa_uuid}"
         )
         
-async def enviar_evento(evento):
+async def enviar_evento(
+    empresa_uuid,
+    evento
+):
 
     desconectados = set()
 
-    for websocket in clientes_ws:
+    for websocket in clientes_ws.get(
+        empresa_uuid,
+        set()
+    ).copy():
 
         try:
 
-            await websocket.send_json(evento)
+            await websocket.send_json(
+                evento
+            )
 
         except Exception:
 
-            desconectados.add(websocket)
+            desconectados.add(
+                websocket
+            )
 
     for websocket in desconectados:
 
-        clientes_ws.discard(websocket)
-        
-@app.post("/test-websocket")
-async def test_websocket():
-
-    await enviar_evento({
-        "tipo": "compra_actualizada",
-        "accion": "creada",
-        "compra_id": "123"
-    })
-
-    return {
-        "ok": True
-    }
+        clientes_ws.get(
+            empresa_uuid,
+            set()
+        ).discard(websocket)
