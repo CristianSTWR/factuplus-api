@@ -2856,6 +2856,18 @@ async def sync_batch(
                         if payload.get("updated_at")
                         else datetime.utcnow()
                     )
+                    
+                    eventos_ws.append({
+                        "tipo": "rol_actualizado",
+                        "accion": "eliminar_rol",
+                        "empresa_uuid": str(
+                            payload["empresa_uuid"]
+                        ),
+                        "rol_id": str(
+                            payload["id"]
+                        ),
+                        "version": incoming_version
+                    })
 
                     await db.flush()    
             
