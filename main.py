@@ -2841,7 +2841,7 @@ async def sync_batch(
                         else datetime.utcnow()
                     )
 
-                    rol.sync_status = "synced"
+                    rol.sync_status = "deleted"
 
                     incoming_version = payload.get(
                         "version",
