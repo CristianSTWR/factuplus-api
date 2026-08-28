@@ -2892,6 +2892,18 @@ async def sync_batch(
                             else None
                         )
                     )
+                    
+                    eventos_ws.append({
+                        "tipo": "producto_actualizado",
+                        "accion": "crear",
+                        "empresa_uuid": str(
+                            payload["empresa_uuid"]
+                        ),
+                        "producto_id": str(
+                            payload["id"]
+                        ),
+                        "version": incoming_version
+                    })
 
                     db.add(producto)
 
@@ -2995,12 +3007,6 @@ async def sync_batch(
                             )
                             if payload.get("updated_at")
                             else None
-                        )
-                        
-                        print(
-                            "🔥 PRODUCTO ACTUALIZADO EN SERVIDOR:",
-                            producto.nombre,
-                            producto.version
                         )
                         
                         eventos_ws.append({
