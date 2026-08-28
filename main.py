@@ -2902,7 +2902,7 @@ async def sync_batch(
                         "producto_id": str(
                             payload["id"]
                         ),
-                        "version": incoming_version
+                        "version": 1
                     })
 
                     db.add(producto)
