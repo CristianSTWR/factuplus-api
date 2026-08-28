@@ -4069,9 +4069,19 @@ async def unidades_medida_changes(
 async def roles_changes(
     empresa_uuid: str,
     since: str | None = None,
+    rol_id: str | None = None,
+    version: int | None = None,
+    limit: int = 1000,
+    offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token no proporcionado"
+        )
 
     token = authorization.replace(
         "Bearer ",
@@ -4093,66 +4103,84 @@ async def roles_changes(
         Rol.empresa_uuid == empresa_uuid
     )
 
-    if since:
+    if rol_id:
+        query = query.where(
+            Rol.id == rol_id
+        )
+
+    if version is not None:
+        query = query.where(
+            Rol.version >= version
+        )
+
+    elif since:
 
         since_dt = parser.isoparse(since)
 
-        if since_dt.tzinfo:
-            since_dt = since_dt.replace(
-                tzinfo=None
-            )
-
         query = query.where(
-            Rol.updated_at > since_dt
+            Rol.updated_at >= since_dt
         )
 
     query = query.order_by(
-        Rol.updated_at.asc()
+        Rol.updated_at.asc(),
+        Rol.id.asc()
     )
+
+    query = query.offset(offset).limit(limit + 1)
 
     result = await db.execute(query)
 
     roles = result.scalars().all()
 
-    return [
-        {
-            "id": str(r.id),
+    has_more = len(roles) > limit
 
-            "empresa_uuid":
-                r.empresa_uuid,
+    if has_more:
+        roles = roles[:limit]
 
-            "nombre":
-                r.nombre,
+    return {
+        "items": [
+            {
+                "id": str(r.id),
 
-            "descripcion":
-                r.descripcion,
+                "empresa_uuid":
+                    r.empresa_uuid,
 
-            "sync_status":
-                r.sync_status,
+                "nombre":
+                    r.nombre,
 
-            "nivel":
-                r.nivel,
+                "descripcion":
+                    r.descripcion,
 
-            "version":
-                r.version,
+                "sync_status":
+                    r.sync_status,
 
-            "updated_at":
-                r.updated_at.isoformat()
-                if r.updated_at
-                else None,
+                "nivel":
+                    r.nivel,
 
-            "created_at":
-                r.created_at.isoformat()
-                if r.created_at
-                else None,
+                "version":
+                    r.version,
 
-            "deleted_at":
-                r.deleted_at.isoformat()
-                if r.deleted_at
-                else None
-        }
-        for r in roles
-    ]
+                "updated_at":
+                    r.updated_at.isoformat()
+                    if r.updated_at
+                    else None,
+
+                "created_at":
+                    r.created_at.isoformat()
+                    if r.created_at
+                    else None,
+
+                "deleted_at":
+                    r.deleted_at.isoformat()
+                    if r.deleted_at
+                    else None
+            }
+            for r in roles
+        ],
+
+        "has_more": has_more
+    }
+
 @app.get("/sync/usuario-roles/changes")
 async def usuario_roles_changes(
     empresa_uuid: str,
