@@ -2730,6 +2730,18 @@ async def sync_batch(
                             if payload.get("updated_at")
                             else rol.updated_at
                         )
+                        
+                        eventos_ws.append({
+                            "tipo": "rol_actualizado",
+                            "accion": "nivel_actualizado",
+                            "empresa_uuid": str(
+                                payload["empresa_uuid"]
+                            ),
+                            "rol_id": str(
+                                payload["id"]
+                            ),
+                            "version": incoming_version
+                        })
 
                         await db.commit()
                         await db.refresh(rol)
