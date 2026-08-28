@@ -6724,7 +6724,14 @@ async def websocket_endpoint(websocket: WebSocket):
 
     await websocket.accept()
 
-    empresa_uuid = websocket.query_params.get("empresa_uuid")
+    empresa_uuid = websocket.query_params.get(
+        "empresa_uuid"
+    )
+
+    print(
+        "WebSocket conectado:",
+        empresa_uuid
+    )
 
     if not empresa_uuid:
         await websocket.close(code=1008)
@@ -6735,59 +6742,21 @@ async def websocket_endpoint(websocket: WebSocket):
 
     clientes_ws[empresa_uuid].add(websocket)
 
-    print(
-        f"WebSocket conectado: {empresa_uuid}"
-    )
-
     try:
 
         while True:
 
-            mensaje = await websocket.receive_json()
-
-            print(
-                "Evento WebSocket recibido:",
-                mensaje
-            )
-
-            for cliente in clientes_ws.get(
-                empresa_uuid,
-                set()
-            ).copy():
-
-                if cliente == websocket:
-                    continue
-
-                try:
-
-                    await cliente.send_json(
-                        mensaje
-                    )
-
-                except Exception:
-
-                    clientes_ws[
-                        empresa_uuid
-                    ].discard(cliente)
+            await websocket.receive_text()
 
     except WebSocketDisconnect:
 
-        clientes_ws[
-            empresa_uuid
-        ].discard(websocket)
-
-        if not clientes_ws[
-            empresa_uuid
-        ]:
-
-            del clientes_ws[
-                empresa_uuid
-            ]
-
-        print(
-            f"WebSocket desconectado: {empresa_uuid}"
+        clientes_ws[empresa_uuid].discard(
+            websocket
         )
-        
+
+        if not clientes_ws[empresa_uuid]:
+            del clientes_ws[empresa_uuid]
+                   
 async def enviar_evento(evento):
 
     desconectados = set()
