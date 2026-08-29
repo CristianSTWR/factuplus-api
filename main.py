@@ -2209,6 +2209,70 @@ async def sync_batch(
                             1
                         )
                     })
+                    
+            elif item_type == "eliminar_usuario_rol":
+
+                usuario_id = UUID(
+                    payload["usuario_id"]
+                )
+
+                rol_id = UUID(
+                    payload["rol_id"]
+                )
+
+                q = await db.execute(
+                    select(UsuarioRol).where(
+                        UsuarioRol.usuario_id == usuario_id,
+                        UsuarioRol.rol_id == rol_id
+                    )
+                )
+
+                usuario_rol = q.scalar_one_or_none()
+
+                if usuario_rol:
+
+                    usuario_rol.deleted_at = (
+                        parse_datetime(
+                            payload["deleted_at"]
+                        )
+                        if payload.get("deleted_at")
+                        else None
+                    )
+
+                    usuario_rol.updated_at = (
+                        parse_datetime(
+                            payload["updated_at"]
+                        )
+                        if payload.get("updated_at")
+                        else None
+                    )
+
+                    usuario_rol.version = payload.get(
+                        "version",
+                        usuario_rol.version
+                    )
+
+                    usuario_rol.sync_status = "synced"
+
+                    eventos_ws.append({
+                        "tipo": "usuario_rol_actualizado",
+                        "accion": "rol_eliminado",
+                        "empresa_uuid": str(
+                            payload["empresa_uuid"]
+                        ),
+                        "usuario_id": str(
+                            payload["usuario_id"]
+                        ),
+                        "rol_id": str(
+                            payload["rol_id"]
+                        ),
+                        "version": payload.get(
+                            "version",
+                            usuario_rol.version
+                        )
+                    })
+
+                    await db.flush()
                         
             elif item_type == "crear_caja":
 
