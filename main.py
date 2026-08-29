@@ -4883,11 +4883,23 @@ async def register_user(
 
         cantidad_usuarios = total_users.scalar() or 0
 
-        print("Cantidad usuarios:", cantidad_usuarios)
+        es_primer_usuario = cantidad_usuarios == 0
+
+        print(
+            "Cantidad usuarios:",
+            cantidad_usuarios
+        )
+
+        print(
+            "Es primer usuario:",
+            es_primer_usuario
+        )
 
         if cantidad_usuarios > 0:
 
-            token = str(payload.get("token", "")).strip()
+            token = str(
+                payload.get("token", "")
+            ).strip()
 
             print("TOKEN:", token)
 
@@ -4914,7 +4926,10 @@ async def register_user(
                 payload.get("token_tmp", "")
             ).strip()
 
-            print("TOKEN TEMPORAL:", token_tmp)
+            print(
+                "TOKEN TEMPORAL:",
+                token_tmp
+            )
 
             if not token_tmp:
                 raise HTTPException(
@@ -4923,13 +4938,17 @@ async def register_user(
                 )
 
             try:
+
                 data = jwt.decode(
                     token_tmp,
                     JWT_SECRET,
                     algorithms=[JWT_ALGORITHM]
                 )
 
-                print("JWT TEMPORAL:", data)
+                print(
+                    "JWT TEMPORAL:",
+                    data
+                )
 
                 if data.get("empresa_uuid") != empresa_uuid:
                     raise HTTPException(
@@ -4941,7 +4960,11 @@ async def register_user(
                 raise
 
             except Exception as e:
-                print("JWT ERROR:", e)
+
+                print(
+                    "JWT ERROR:",
+                    e
+                )
 
                 raise HTTPException(
                     status_code=401,
@@ -4995,7 +5018,9 @@ async def register_user(
             if not existe_codigo.scalar_one_or_none():
                 break
 
-        password_hash = pwd_context.hash(contraseña)
+        password_hash = pwd_context.hash(
+            contraseña
+        )
 
         nuevo_usuario = User(
             empresa_uuid=empresa_uuid,
@@ -5012,6 +5037,7 @@ async def register_user(
         db.add(nuevo_usuario)
 
         await db.commit()
+
         await db.refresh(nuevo_usuario)
 
         return {
@@ -5025,8 +5051,17 @@ async def register_user(
             "permitir_nube": nuevo_usuario.permitir_nube,
             "sync_status": nuevo_usuario.sync_status,
             "version": nuevo_usuario.version,
-            "created_at": nuevo_usuario.created_at.isoformat() if nuevo_usuario.created_at else None,
-            "updated_at": nuevo_usuario.updated_at.isoformat() if nuevo_usuario.updated_at else None
+            "created_at": (
+                nuevo_usuario.created_at.isoformat()
+                if nuevo_usuario.created_at
+                else None
+            ),
+            "updated_at": (
+                nuevo_usuario.updated_at.isoformat()
+                if nuevo_usuario.updated_at
+                else None
+            ),
+            "primer_usuario": es_primer_usuario
         }
 
     except HTTPException:
@@ -5034,13 +5069,16 @@ async def register_user(
 
     except Exception as e:
 
-        print("ERROR REGISTER USER:", repr(e))
+        print(
+            "ERROR REGISTER USER:",
+            repr(e)
+        )
 
         raise HTTPException(
             status_code=500,
             detail=str(e)
-        )     
-
+        )
+        
 @app.post("/login-user")
 async def login_user(
     payload: dict,
