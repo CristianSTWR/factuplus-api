@@ -2152,6 +2152,64 @@ async def sync_batch(
                         user.version += 1
                         user.updated_at = datetime.now(timezone.utc)
                         
+            elif item_type == "crear_usuario_rol":
+
+                q = await db.execute(
+                    select(UsuarioRol).where(
+                        UsuarioRol.usuario_id == UUID(payload["usuario_id"]),
+                        UsuarioRol.rol_id == UUID(payload["rol_id"])
+                    )
+                )
+
+                usuario_rol = q.scalar_one_or_none()
+
+                if not usuario_rol:
+
+                    usuario_rol = UsuarioRol(
+                        usuario_id=UUID(payload["usuario_id"]),
+                        rol_id=UUID(payload["rol_id"]),
+                        empresa_uuid=payload["empresa_uuid"],
+                        version=payload.get("version", 1),
+                        sync_status="synced",
+                        created_at=(
+                            parse_datetime(payload["created_at"])
+                            if payload.get("created_at")
+                            else None
+                        ),
+                        updated_at=(
+                            parse_datetime(payload["updated_at"])
+                            if payload.get("updated_at")
+                            else None
+                        ),
+                        deleted_at=(
+                            parse_datetime(payload["deleted_at"])
+                            if payload.get("deleted_at")
+                            else None
+                        )
+                    )
+
+                    db.add(usuario_rol)
+
+                    await db.flush()
+
+                    eventos_ws.append({
+                        "tipo": "usuario_rol_actualizado",
+                        "accion": "rol_asignado",
+                        "empresa_uuid": str(
+                            payload["empresa_uuid"]
+                        ),
+                        "usuario_id": str(
+                            payload["usuario_id"]
+                        ),
+                        "rol_id": str(
+                            payload["rol_id"]
+                        ),
+                        "version": payload.get(
+                            "version",
+                            1
+                        )
+                    })
+                        
             elif item_type == "crear_caja":
 
                 caja_uuid = UUID(payload["id"])
@@ -2794,44 +2852,7 @@ async def sync_batch(
 
                     await db.flush()
             
-            elif item_type == "crear_usuario_rol":
-                q = await db.execute(
-                    select(UsuarioRol).where(
-                        UsuarioRol.usuario_id == UUID(payload["usuario_id"]),
-                        UsuarioRol.rol_id == UUID(payload["rol_id"])
-                    )
-                )
-
-                usuario_rol = q.scalar_one_or_none()
-
-                if not usuario_rol:
-
-                    usuario_rol = UsuarioRol(
-                        usuario_id=UUID(payload["usuario_id"]),
-                        rol_id=UUID(payload["rol_id"]),
-                        empresa_uuid=payload["empresa_uuid"],
-                        version=payload.get("version", 1),
-                        sync_status="synced",
-                        created_at=(
-                            parse_datetime(payload["created_at"])
-                            if payload.get("created_at")
-                            else None
-                        ),
-                        updated_at=(
-                            parse_datetime(payload["updated_at"])
-                            if payload.get("updated_at")
-                            else None
-                        ),
-                        deleted_at=(
-                            parse_datetime(payload["deleted_at"])
-                            if payload.get("deleted_at")
-                            else None
-                        )
-                    )
-
-                    db.add(usuario_rol)
-
-                    await db.flush()  
+    
                     
             elif item_type == "eliminar_rol":
 
