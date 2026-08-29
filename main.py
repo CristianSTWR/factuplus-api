@@ -2261,6 +2261,8 @@ async def sync_batch(
                         if payload.get("deleted_at")
                         else None
                     )
+                    
+                    usuario_rol.sync_status = "deleted"
 
                     usuario_rol.updated_at = (
                         parse_datetime(
