@@ -2643,7 +2643,23 @@ async def sync_batch(
                             if payload.get("deleted_at")
                             else None
                         )
+                        
                     )
+                    
+                    eventos_ws.append({
+                        "tipo": "rol_actualizado",
+                        "accion": "crear_rol",
+                        "empresa_uuid": str(
+                            payload["empresa_uuid"]
+                        ),
+                        "rol_id": str(
+                            payload["id"]
+                        ),
+                        "version": payload.get(
+                            "version",
+                            1
+                        )
+                    })
 
                     db.add(rol)
 
