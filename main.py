@@ -2655,10 +2655,7 @@ async def sync_batch(
                         "rol_id": str(
                             payload["id"]
                         ),
-                        "version": payload.get(
-                            "version",
-                            1
-                        )
+                        "version": 1
                     })
 
                     db.add(rol)
