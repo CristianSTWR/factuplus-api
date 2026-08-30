@@ -5239,16 +5239,6 @@ async def register_user(
                 "version": nuevo_usuario.version
             })
 
-            for usuario_rol in usuario_roles_creados:
-                eventos_ws.append({
-                    "tipo": "usuario_rol_actualizado",
-                    "accion": "rol_asignado",
-                    "empresa_uuid": str(empresa_uuid),
-                    "usuario_id": str(nuevo_usuario.id),
-                    "rol_id": str(usuario_rol["rol_id"]),
-                    "version": usuario_rol["version"]
-                })
-
         await db.refresh(nuevo_usuario)
 
         for evento in eventos_ws:
