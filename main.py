@@ -3078,8 +3078,6 @@ async def sync_batch(
                     db.add(metodo_pago)
 
                     await db.flush()
-            
-    
                     
             elif item_type == "eliminar_rol":
 
@@ -3096,42 +3094,130 @@ async def sync_batch(
 
                 if rol:
 
-                    rol.deleted_at = (
-                        parse_datetime(payload.get("deleted_at"))
-                        if payload.get("deleted_at")
-                        else datetime.utcnow()
+                    incoming_version = int(
+                        payload.get(
+                            "version",
+                            rol.version + 1
+                        )
                     )
 
-                    rol.sync_status = "deleted"
+                    if incoming_version >= rol.version:
 
-                    incoming_version = payload.get(
-                        "version",
-                        rol.version + 1
-                    )
+                        rol.deleted_at = (
+                            parse_datetime(payload["deleted_at"])
+                            if payload.get("deleted_at")
+                            else datetime.utcnow()
+                        )
 
-                    if incoming_version > rol.version:
+                        rol.sync_status = "deleted"
                         rol.version = incoming_version
 
-                    rol.updated_at = (
-                        parse_datetime(payload.get("updated_at"))
-                        if payload.get("updated_at")
-                        else datetime.utcnow()
-                    )
-                    
-                    eventos_ws.append({
-                        "tipo": "rol_actualizado",
-                        "accion": "eliminar_rol",
-                        "empresa_uuid": str(
-                            payload["empresa_uuid"]
-                        ),
-                        "rol_id": str(
-                            payload["id"]
-                        ),
-                        "version": incoming_version
-                    })
+                        rol.updated_at = (
+                            parse_datetime(payload["updated_at"])
+                            if payload.get("updated_at")
+                            else datetime.utcnow()
+                        )
 
-                    await db.flush()    
-            
+                        eventos_ws.append({
+                            "tipo": "rol_actualizado",
+                            "accion": "eliminar_rol",
+                            "empresa_uuid": str(
+                                payload["empresa_uuid"]
+                            ),
+                            "rol_id": str(
+                                payload["id"]
+                            ),
+                            "version": incoming_version
+                        })
+
+                        await db.flush()
+
+                    
+            elif item_type == "eliminar_rol_permiso":
+
+                rol_id = UUID(payload["rol_id"])
+                permiso_id = UUID(payload["permiso_id"])
+
+                q = await db.execute(
+                    select(RolPermiso).where(
+                        RolPermiso.rol_id == rol_id,
+                        RolPermiso.permiso_id == permiso_id,
+                        RolPermiso.empresa_uuid == payload["empresa_uuid"]
+                    )
+                )
+
+                rol_permiso = q.scalar_one_or_none()
+
+                if rol_permiso:
+
+                    incoming_version = int(
+                        payload.get(
+                            "version",
+                            rol_permiso.version + 1
+                        )
+                    )
+
+                    if incoming_version >= rol_permiso.version:
+
+                        rol_permiso.deleted_at = (
+                            parse_datetime(payload["deleted_at"])
+                            if payload.get("deleted_at")
+                            else datetime.utcnow()
+                        )
+
+                        rol_permiso.sync_status = "deleted"
+                        rol_permiso.version = incoming_version
+
+                        rol_permiso.updated_at = (
+                            parse_datetime(payload["updated_at"])
+                            if payload.get("updated_at")
+                            else datetime.utcnow()
+                        )
+
+                        await db.flush()
+                        
+            elif item_type == "eliminar_usuario_rol":
+
+                usuario_id = UUID(payload["usuario_id"])
+                rol_id = UUID(payload["rol_id"])
+
+                q = await db.execute(
+                    select(UsuarioRol).where(
+                        UsuarioRol.usuario_id == usuario_id,
+                        UsuarioRol.rol_id == rol_id,
+                        UsuarioRol.empresa_uuid == payload["empresa_uuid"]
+                    )
+                )
+
+                usuario_rol = q.scalar_one_or_none()
+
+                if usuario_rol:
+
+                    incoming_version = int(
+                        payload.get(
+                            "version",
+                            usuario_rol.version + 1
+                        )
+                    )
+
+                    if incoming_version >= usuario_rol.version:
+
+                        usuario_rol.deleted_at = (
+                            parse_datetime(payload["deleted_at"])
+                            if payload.get("deleted_at")
+                            else datetime.utcnow()
+                        )
+
+                        usuario_rol.sync_status = "deleted"
+                        usuario_rol.version = incoming_version
+
+                        usuario_rol.updated_at = (
+                            parse_datetime(payload["updated_at"])
+                            if payload.get("updated_at")
+                            else datetime.utcnow()
+                        )
+
+                        await db.flush()
                
                     
             elif item_type == "crear_producto":
