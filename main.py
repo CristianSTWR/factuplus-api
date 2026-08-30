@@ -2738,7 +2738,7 @@ async def sync_batch(
                     db.add(unidad)
 
                     await db.flush()
-                    
+                
             elif item_type == "crear_rol":
 
                 rol_id = UUID(payload["id"])
@@ -2757,15 +2757,156 @@ async def sync_batch(
                         id=rol_id,
                         empresa_uuid=payload["empresa_uuid"],
                         nombre=payload["nombre"],
-                        descripcion=payload.get(
-                            "descripcion"
+                        descripcion=payload.get("descripcion"),
+                        version=payload.get("version", 1),
+                        nivel=payload.get("nivel", 1),
+                        sync_status="synced",
+                        created_at=(
+                            parse_datetime(payload["created_at"])
+                            if payload.get("created_at")
+                            else None
                         ),
+                        updated_at=(
+                            parse_datetime(payload["updated_at"])
+                            if payload.get("updated_at")
+                            else None
+                        ),
+                        deleted_at=(
+                            parse_datetime(payload["deleted_at"])
+                            if payload.get("deleted_at")
+                            else None
+                        )
+                    )
+
+                    db.add(rol)
+
+                    await db.flush()
+
+                    eventos_ws.append({
+                        "tipo": "rol_actualizado",
+                        "accion": "crear_rol",
+                        "empresa_uuid": str(
+                            payload["empresa_uuid"]
+                        ),
+                        "rol_id": str(
+                            payload["id"]
+                        ),
+                        "version": rol.version
+                    })
+
+                else:
+
+                    version_payload = int(
+                        payload.get("version", 1)
+                    )
+
+                    if rol.deleted_at is not None:
+
+                        rol.nombre = payload["nombre"]
+
+                        rol.descripcion = payload.get(
+                            "descripcion"
+                        )
+
+                        rol.nivel = payload.get(
+                            "nivel",
+                            rol.nivel
+                        )
+
+                        rol.deleted_at = None
+
+                        rol.version = max(
+                            int(rol.version or 0) + 1,
+                            version_payload
+                        )
+
+                        rol.sync_status = "synced"
+
+                        if payload.get("updated_at"):
+                            rol.updated_at = parse_datetime(
+                                payload["updated_at"]
+                            )
+
+                        eventos_ws.append({
+                            "tipo": "rol_actualizado",
+                            "accion": "restaurar_rol",
+                            "empresa_uuid": str(
+                                payload["empresa_uuid"]
+                            ),
+                            "rol_id": str(
+                                payload["id"]
+                            ),
+                            "version": rol.version
+                        })
+
+                    else:
+
+                        if version_payload > int(
+                            rol.version or 0
+                        ):
+
+                            rol.nombre = payload["nombre"]
+
+                            rol.descripcion = payload.get(
+                                "descripcion"
+                            )
+
+                            rol.nivel = payload.get(
+                                "nivel",
+                                rol.nivel
+                            )
+
+                            rol.version = version_payload
+
+                            rol.sync_status = "synced"
+
+                            if payload.get("updated_at"):
+                                rol.updated_at = parse_datetime(
+                                    payload["updated_at"]
+                                )
+
+                            eventos_ws.append({
+                                "tipo": "rol_actualizado",
+                                "accion": "actualizar_rol",
+                                "empresa_uuid": str(
+                                    payload["empresa_uuid"]
+                                ),
+                                "rol_id": str(
+                                    payload["id"]
+                                ),
+                                "version": rol.version
+                            })
+
+                await db.flush()
+
+
+            elif item_type == "crear_rol_permiso":
+
+                rol_id = UUID(
+                    payload["rol_id"]
+                )
+
+                permiso_id = UUID(
+                    payload["permiso_id"]
+                )
+
+                q = await db.execute(
+                    select(RolPermiso).where(
+                        RolPermiso.rol_id == rol_id,
+                        RolPermiso.permiso_id == permiso_id
+                    )
+                )
+
+                rol_permiso = q.scalar_one_or_none()
+
+                if not rol_permiso:
+
+                    rol_permiso = RolPermiso(
+                        empresa_uuid=payload["empresa_uuid"],
+                        rol_id=rol_id,
+                        permiso_id=permiso_id,
                         version=payload.get(
                             "version",
-                            1
-                        ),
-                        nivel=payload.get(
-                            "nivel",
                             1
                         ),
                         sync_status="synced",
@@ -2790,64 +2931,61 @@ async def sync_batch(
                             if payload.get("deleted_at")
                             else None
                         )
-                        
-                    )
-                    
-                    eventos_ws.append({
-                        "tipo": "rol_actualizado",
-                        "accion": "crear_rol",
-                        "empresa_uuid": str(
-                            payload["empresa_uuid"]
-                        ),
-                        "rol_id": str(
-                            payload["id"]
-                        ),
-                        "version": 1
-                    })
-
-                    db.add(rol)
-
-                    await db.flush()
-                    
-            elif item_type == "crear_rol_permiso":
-
-                q = await db.execute(
-                    select(RolPermiso).where(
-                        RolPermiso.rol_id == UUID(payload["rol_id"]),
-                        RolPermiso.permiso_id == UUID(payload["permiso_id"])
-                    )
-                )
-
-                rol_permiso = q.scalar_one_or_none()
-
-                if not rol_permiso:
-
-                    rol_permiso = RolPermiso(
-                        empresa_uuid=payload["empresa_uuid"],
-                        rol_id=UUID(payload["rol_id"]),
-                        permiso_id=UUID(payload["permiso_id"]),
-                        version=payload.get("version", 1),
-                        sync_status="synced",
-                        created_at=(
-                            parse_datetime(payload["created_at"])
-                            if payload.get("created_at")
-                            else None
-                        ),
-                        updated_at=(
-                            parse_datetime(payload["updated_at"])
-                            if payload.get("updated_at")
-                            else None
-                        ),
-                        deleted_at=(
-                            parse_datetime(payload["deleted_at"])
-                            if payload.get("deleted_at")
-                            else None
-                        )
                     )
 
                     db.add(rol_permiso)
 
                     await db.flush()
+
+                else:
+
+                    version_payload = int(
+                        payload.get("version", 1)
+                    )
+
+                    if rol_permiso.deleted_at is not None:
+
+                        rol_permiso.deleted_at = None
+
+                        rol_permiso.version = max(
+                            int(
+                                rol_permiso.version or 0
+                            ) + 1,
+                            version_payload
+                        )
+
+                        rol_permiso.sync_status = "synced"
+
+                        if payload.get("updated_at"):
+                            rol_permiso.updated_at = (
+                                parse_datetime(
+                                    payload["updated_at"]
+                                )
+                            )
+
+                    else:
+
+                        if version_payload > int(
+                            rol_permiso.version or 0
+                        ):
+
+                            rol_permiso.version = (
+                                version_payload
+                            )
+
+                            rol_permiso.sync_status = (
+                                "synced"
+                            )
+
+                            if payload.get("updated_at"):
+                                rol_permiso.updated_at = (
+                                    parse_datetime(
+                                        payload["updated_at"]
+                                    )
+                                )
+
+                    await db.flush()
+
                     
             elif item_type == "actualizar_rol_nivel":
 
@@ -2956,66 +3094,33 @@ async def sync_batch(
 
                 rol = q.scalar_one_or_none()
 
-                incoming_version = int(
-                    payload.get("version", 1)
-                )
-
-                now = datetime.utcnow()
-
                 if rol:
 
-                    if incoming_version > rol.version:
-
-                        rol.deleted_at = None
-                        rol.sync_status = "synced"
-                        rol.version = incoming_version
-
-                        rol.updated_at = (
-                            parse_datetime(payload.get("updated_at"))
-                            if payload.get("updated_at")
-                            else now
-                        )
-
-                    else:
-
-                        rol.deleted_at = None
-                        rol.sync_status = "synced"
-
-                    eventos_ws.append({
-                        "tipo": "rol_actualizado",
-                        "accion": "restaurar_rol",
-                        "empresa_uuid": str(
-                            payload["empresa_uuid"]
-                        ),
-                        "rol_id": str(
-                            payload["id"]
-                        ),
-                        "version": rol.version
-                    })
-
-                else:
-
-                    rol = Rol(
-                        id=rol_id,
-                        nombre=payload["nombre"],
-                        empresa_uuid=UUID(
-                            payload["empresa_uuid"]
-                        ),
-                        deleted_at=None,
-                        sync_status="synced",
-                        version=incoming_version,
-                        updated_at=(
-                            parse_datetime(payload.get("updated_at"))
-                            if payload.get("updated_at")
-                            else now
-                        )
+                    rol.deleted_at = (
+                        parse_datetime(payload.get("deleted_at"))
+                        if payload.get("deleted_at")
+                        else datetime.utcnow()
                     )
 
-                    db.add(rol)
+                    rol.sync_status = "deleted"
 
+                    incoming_version = payload.get(
+                        "version",
+                        rol.version + 1
+                    )
+
+                    if incoming_version > rol.version:
+                        rol.version = incoming_version
+
+                    rol.updated_at = (
+                        parse_datetime(payload.get("updated_at"))
+                        if payload.get("updated_at")
+                        else datetime.utcnow()
+                    )
+                    
                     eventos_ws.append({
                         "tipo": "rol_actualizado",
-                        "accion": "restaurar_rol",
+                        "accion": "eliminar_rol",
                         "empresa_uuid": str(
                             payload["empresa_uuid"]
                         ),
@@ -3025,7 +3130,7 @@ async def sync_batch(
                         "version": incoming_version
                     })
 
-                await db.flush()
+                    await db.flush()    
             
                
                     
