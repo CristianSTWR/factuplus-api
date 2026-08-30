@@ -2956,33 +2956,66 @@ async def sync_batch(
 
                 rol = q.scalar_one_or_none()
 
+                incoming_version = int(
+                    payload.get("version", 1)
+                )
+
+                now = datetime.utcnow()
+
                 if rol:
 
-                    rol.deleted_at = (
-                        parse_datetime(payload.get("deleted_at"))
-                        if payload.get("deleted_at")
-                        else datetime.utcnow()
-                    )
-
-                    rol.sync_status = "deleted"
-
-                    incoming_version = payload.get(
-                        "version",
-                        rol.version + 1
-                    )
-
                     if incoming_version > rol.version:
+
+                        rol.deleted_at = None
+                        rol.sync_status = "synced"
                         rol.version = incoming_version
 
-                    rol.updated_at = (
-                        parse_datetime(payload.get("updated_at"))
-                        if payload.get("updated_at")
-                        else datetime.utcnow()
-                    )
-                    
+                        rol.updated_at = (
+                            parse_datetime(payload.get("updated_at"))
+                            if payload.get("updated_at")
+                            else now
+                        )
+
+                    else:
+
+                        rol.deleted_at = None
+                        rol.sync_status = "synced"
+
                     eventos_ws.append({
                         "tipo": "rol_actualizado",
-                        "accion": "eliminar_rol",
+                        "accion": "restaurar_rol",
+                        "empresa_uuid": str(
+                            payload["empresa_uuid"]
+                        ),
+                        "rol_id": str(
+                            payload["id"]
+                        ),
+                        "version": rol.version
+                    })
+
+                else:
+
+                    rol = Rol(
+                        id=rol_id,
+                        nombre=payload["nombre"],
+                        empresa_uuid=UUID(
+                            payload["empresa_uuid"]
+                        ),
+                        deleted_at=None,
+                        sync_status="synced",
+                        version=incoming_version,
+                        updated_at=(
+                            parse_datetime(payload.get("updated_at"))
+                            if payload.get("updated_at")
+                            else now
+                        )
+                    )
+
+                    db.add(rol)
+
+                    eventos_ws.append({
+                        "tipo": "rol_actualizado",
+                        "accion": "restaurar_rol",
                         "empresa_uuid": str(
                             payload["empresa_uuid"]
                         ),
@@ -2992,7 +3025,7 @@ async def sync_batch(
                         "version": incoming_version
                     })
 
-                    await db.flush()    
+                await db.flush()
             
                
                     
