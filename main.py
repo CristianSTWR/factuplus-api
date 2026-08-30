@@ -5229,7 +5229,9 @@ async def register_user(
         eventos_ws = []
         
         if not es_primer_usuario:
+            
             for usuario_rol in usuario_roles_creados:
+                
                 eventos_ws.append({
                         "tipo": "usuario_actualizado",
                         "accion": "crear_usuario",
@@ -5245,6 +5247,12 @@ async def register_user(
         await db.refresh(
             nuevo_usuario
         )
+        
+        for evento in eventos_ws:
+            await enviar_evento(
+                evento["empresa_uuid"],
+                evento
+            )
 
         return {
             "ok": True,
