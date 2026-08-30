@@ -6756,6 +6756,9 @@ async def restore_roles_changes(
 
                 "version":
                     r.version,
+                    
+                "nivel":
+                    r.nivel,
 
                 "updated_at":
                     r.updated_at.isoformat()
