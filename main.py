@@ -5226,6 +5226,21 @@ async def register_user(
             )
 
         await db.commit()
+        eventos_ws = []
+        
+        if not es_primer_usuario:
+            for usuario_rol in usuario_roles_creados:
+                eventos_ws.append({
+                        "tipo": "usuario_actualizado",
+                        "accion": "crear_usuario",
+                        "empresa_uuid": str(
+                            payload["empresa_uuid"]
+                        ),
+                        "rol_id": str(
+                            payload["id"]
+                        ),
+                        "version": 1
+                    })
 
         await db.refresh(
             nuevo_usuario
