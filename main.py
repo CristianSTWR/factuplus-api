@@ -5231,8 +5231,15 @@ async def register_user(
 
         if not es_primer_usuario:
 
-            for usuario_rol in usuario_roles_creados:
+            eventos_ws.append({
+                "tipo": "usuario_actualizado",
+                "accion": "crear_usuario",
+                "empresa_uuid": str(empresa_uuid),
+                "usuario_id": str(nuevo_usuario.id),
+                "version": nuevo_usuario.version
+            })
 
+            for usuario_rol in usuario_roles_creados:
                 eventos_ws.append({
                     "tipo": "usuario_rol_actualizado",
                     "accion": "rol_asignado",
