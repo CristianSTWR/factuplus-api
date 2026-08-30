@@ -5320,7 +5320,7 @@ async def register_user(
         await db.rollback()
 
         print(
-            "ERROR REGISTER USER:",
+            "ERROR REGISTER USERs:",
             repr(e)
         )
 
