@@ -2826,6 +2826,11 @@ async def sync_batch(
                             rol.updated_at = parse_datetime(
                                 payload["updated_at"]
                             )
+                            
+                        if payload.get("created_at"):
+                            rol.created_at = parse_datetime(
+                                payload["created_at"]
+                            )
 
                         eventos_ws.append({
                             "tipo": "rol_actualizado",
