@@ -2128,9 +2128,7 @@ async def sync_batch(
 
 
             elif item_type == "eliminar_usuario":
-                usuario_id = UUID(
-                    payload["id"]
-                )
+                usuario_id = UUID(payload["id"])
 
                 q = await db.execute(
                     select(User).where(
@@ -2142,11 +2140,8 @@ async def sync_batch(
                 usuario = q.scalar_one_or_none()
 
                 if usuario:
-
                     usuario.deleted_at = (
-                        parse_datetime(
-                            payload["deleted_at"]
-                        )
+                        parse_datetime(payload["deleted_at"])
                         if payload.get("deleted_at")
                         else None
                     )
@@ -2156,38 +2151,26 @@ async def sync_batch(
                     usuario.sync_status = "deleted"
 
                     usuario.updated_at = (
-                        parse_datetime(
-                            payload["updated_at"]
-                        )
+                        parse_datetime(payload["updated_at"])
                         if payload.get("updated_at")
-                        else None
+                        else datetime.utcnow()
                     )
 
-                    usuario.version = payload.get(
-                        "version",
-                        usuario.version
+                    usuario.version = int(
+                        payload.get("version", usuario.version)
                     )
-
 
                     usuario.sync_status = "synced"
-                    """ sadas """
+
                     eventos_ws.append({
                         "tipo": "usuario_actualizado",
                         "accion": "usuario_eliminado",
-                        "empresa_uuid": str(
-                            payload["empresa_uuid"]
-                        ),
-                        "usuario_id": str(
-                            payload["id"]
-                        ),
-                        "version": payload.get(
-                            "version",
-                            usuario.version
-                        )
+                        "empresa_uuid": str(payload["empresa_uuid"]),
+                        "usuario_id": str(payload["id"]),
+                        "version": usuario.version
                     })
 
                     await db.flush()
-
             elif item_type == "actualizar_usuario":
 
                 id = payload["id"]

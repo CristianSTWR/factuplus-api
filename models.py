@@ -480,15 +480,14 @@ class User(Base):
         server_default=text("'synced'")
     )
 
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime,
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
         nullable=True
     )
 
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        nullable=False,
-        server_default=text("CURRENT_TIMESTAMP")
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
     )
     
     correo: Mapped[str | None] = mapped_column(
