@@ -2127,6 +2127,66 @@ async def sync_batch(
                     db.add(user)
 
 
+            elif item_type == "eliminar_usuario":
+                usuario_id = UUID(
+                    payload["id"]
+                )
+
+                q = await db.execute(
+                    select(User).where(
+                        User.id == usuario_id,
+                        User.empresa_uuid == payload["empresa_uuid"]
+                    )
+                )
+
+                usuario = q.scalar_one_or_none()
+
+                if usuario:
+
+                    usuario.deleted_at = (
+                        parse_datetime(
+                            payload["deleted_at"]
+                        )
+                        if payload.get("deleted_at")
+                        else None
+                    )
+
+                    usuario.activo = False
+
+                    usuario.sync_status = "deleted"
+
+                    usuario.updated_at = (
+                        parse_datetime(
+                            payload["updated_at"]
+                        )
+                        if payload.get("updated_at")
+                        else None
+                    )
+
+                    usuario.version = payload.get(
+                        "version",
+                        usuario.version
+                    )
+
+                    usuario.sync_status = "synced"
+
+                    eventos_ws.append({
+                        "tipo": "usuario_actualizado",
+                        "accion": "usuario_eliminado",
+                        "empresa_uuid": str(
+                            payload["empresa_uuid"]
+                        ),
+                        "usuario_id": str(
+                            payload["id"]
+                        ),
+                        "version": payload.get(
+                            "version",
+                            usuario.version
+                        )
+                    })
+
+                    await db.flush()
+
             elif item_type == "actualizar_usuario":
 
                 id = payload["id"]
