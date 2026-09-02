@@ -2168,8 +2168,9 @@ async def sync_batch(
                         usuario.version
                     )
 
-                    usuario.sync_status = "synced"
 
+                    usuario.sync_status = "synced"
+                    """ sadas """
                     eventos_ws.append({
                         "tipo": "usuario_actualizado",
                         "accion": "usuario_eliminado",
