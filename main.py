@@ -2095,7 +2095,6 @@ async def sync_batch(
                         company.updated_at = datetime.utcnow()
                         
             elif item_type == "crear_usuario":
-
                 user_uuid = UUID(payload["id"])
 
                 q = await db.execute(
@@ -2106,8 +2105,7 @@ async def sync_batch(
                 )
 
                 exists = q.scalar_one_or_none()
-        
-                
+
                 print("RAW ITEM:", item)
                 print("PAYLOAD TYPE:", type(item.get("payload")))
 
@@ -2119,12 +2117,55 @@ async def sync_batch(
                         nombre=payload.get("nombre"),
                         usuario=payload.get("usuario"),
                         codigo=payload.get("codigo"),
-                       
                         activo=payload.get("activo", True),
                         permitir_nube=payload.get("permitir_nube", False),
+                        deleted_at=None,
                     )
 
                     db.add(user)
+
+                else:
+
+                    exists.nombre = payload.get(
+                        "nombre",
+                        exists.nombre
+                    )
+
+                    exists.usuario = payload.get(
+                        "usuario",
+                        exists.usuario
+                    )
+
+                    exists.codigo = payload.get(
+                        "codigo",
+                        exists.codigo
+                    )
+
+                    exists.activo = payload.get(
+                        "activo",
+                        exists.activo
+                    )
+
+                    exists.permitir_nube = payload.get(
+                        "permitir_nube",
+                        exists.permitir_nube
+                    )
+
+                    if exists.deleted_at is not None:
+
+                        print(
+                            "RESTAURANDO USUARIO:",
+                            exists.id
+                        )
+
+                        exists.deleted_at = None
+
+                    exists.updated_at = datetime.utcnow()
+
+                    if hasattr(exists, "version"):
+                        exists.version = (
+                            exists.version or 0
+                        ) + 1
 
 
             elif item_type == "eliminar_usuario":
