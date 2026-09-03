@@ -3452,7 +3452,6 @@ async def sync_batch(
                         await db.refresh(cliente)
                  
             elif item_type == "actualizar_producto":
-
                 producto_id = payload["id"]
 
                 q = await db.execute(
@@ -3497,7 +3496,18 @@ async def sync_batch(
                             if payload.get("updated_at")
                             else None
                         )
-                        
+
+                        unidad_nombre = None
+
+                        if producto.unidad_id:
+                            q_unidad = await db.execute(
+                                select(UnidadMedida.nombre).where(
+                                    UnidadMedida.id == producto.unidad_id
+                                )
+                            )
+
+                            unidad_nombre = q_unidad.scalar_one_or_none()
+
                         eventos_ws.append({
                             "tipo": "producto_actualizado",
                             "accion": "actualizado",
@@ -3507,12 +3517,17 @@ async def sync_batch(
                             "producto_id": str(
                                 payload["id"]
                             ),
-                            "version": incoming_version
+                            "version": incoming_version,
+                            "unidad_id": (
+                                str(producto.unidad_id)
+                                if producto.unidad_id
+                                else None
+                            ),
+                            "unidad_nombre": unidad_nombre
                         })
 
                         await db.commit()
-                        await db.refresh(producto)
-                        
+                        await db.refresh(producto)         
                     
                         
                         
