@@ -5744,8 +5744,7 @@ async def register_user(
 
         empresa = await db.execute(
             select(Company).where(
-                Company.uuid ==
-                empresa_uuid
+                Company.uuid == empresa_uuid
             )
         )
 
@@ -5764,8 +5763,7 @@ async def register_user(
                 func.count(User.id)
             ).where(
                 User.empresa_uuid ==
-                empresa_uuid,
-                User.deleted_at.is_(None)
+                empresa_uuid
             )
         )
 
@@ -5902,14 +5900,12 @@ async def register_user(
                 detail="Contraseña requerida"
             )
 
-        existe_usuario_result = (
-            await db.execute(
-                select(User).where(
-                    User.empresa_uuid ==
-                    empresa_uuid,
-                    User.usuario ==
-                    usuario
-                )
+        existe_usuario_result = await db.execute(
+            select(User).where(
+                User.empresa_uuid ==
+                empresa_uuid,
+                User.usuario ==
+                usuario
             )
         )
 
@@ -5938,10 +5934,6 @@ async def register_user(
 
             usuario_restaurado = True
 
-            codigo_anterior = (
-                usuario_existente.codigo
-            )
-
             usuario_existente.nombre = (
                 nombre
             )
@@ -5964,26 +5956,21 @@ async def register_user(
                 )
             )
 
-            usuario_existente.deleted_at = (
-                None
-            )
+            usuario_existente.deleted_at = None
 
             usuario_existente.sync_status = (
                 "synced"
-            )
-
-            usuario_existente.updated_at = (
-                datetime.now(timezone.utc)
             )
 
             usuario_existente.version = (
                 usuario_existente.version or 0
             ) + 1
 
-            if codigo_anterior:
-                usuario_existente.codigo = (
-                    codigo_anterior
+            usuario_existente.updated_at = (
+                datetime.now(
+                    timezone.utc
                 )
+            )
 
             nuevo_usuario = (
                 usuario_existente
@@ -6000,14 +5987,12 @@ async def register_user(
                     )
                 )
 
-                existe_codigo = (
-                    await db.execute(
-                        select(User).where(
-                            User.empresa_uuid ==
-                            empresa_uuid,
-                            User.codigo ==
-                            codigo
-                        )
+                existe_codigo = await db.execute(
+                    select(User).where(
+                        User.empresa_uuid ==
+                        empresa_uuid,
+                        User.codigo ==
+                        codigo
                     )
                 )
 
@@ -6073,16 +6058,14 @@ async def register_user(
 
         if roles_ids:
 
-            roles_result = (
-                await db.execute(
-                    select(Role).where(
-                        Role.id.in_(
-                            roles_ids
-                        ),
-                        Role.empresa_uuid ==
-                        empresa_uuid,
-                        Role.deleted_at.is_(None)
-                    )
+            roles_result = await db.execute(
+                select(Rol).where(
+                    Rol.id.in_(
+                        roles_ids
+                    ),
+                    Rol.empresa_uuid ==
+                    empresa_uuid,
+                    Rol.deleted_at.is_(None)
                 )
             )
 
@@ -6144,7 +6127,8 @@ async def register_user(
                 usuario_rol = UsuarioRol(
                     usuario_id=
                         nuevo_usuario.id,
-                    rol_id=rol.id,
+                    rol_id=
+                        rol.id,
                     empresa_uuid=
                         empresa_uuid,
                     version=1,
@@ -6160,9 +6144,7 @@ async def register_user(
 
             else:
 
-                usuario_rol.deleted_at = (
-                    None
-                )
+                usuario_rol.deleted_at = None
 
                 usuario_rol.sync_status = (
                     "synced"
@@ -6374,15 +6356,14 @@ async def register_user(
         await db.rollback()
 
         print(
-            "ERROR REGISTER USERs:",
+            "ERROR REGISTER USERS:",
             repr(e)
         )
 
         raise HTTPException(
             status_code=500,
             detail=str(e)
-        )
-      
+        )    
 @app.post("/login-user")
 async def login_user(
     payload: dict,
