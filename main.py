@@ -3511,6 +3511,7 @@ async def sync_batch(
                         eventos_ws.append({
                             "tipo": "producto_actualizado",
                             "accion": "actualizado",
+                            "nombre_unidad": unidad_nombre,
                             "empresa_uuid": str(
                                 payload["empresa_uuid"]
                             ),
