@@ -85,7 +85,7 @@ from db import get_db
 load_dotenv()
 validate_settings()
 
-# logging
+# loggings
 logging.basicConfig(level=(logging.INFO if IS_PROD else logging.DEBUG))
 logger = logging.getLogger("factuplus")
 
@@ -3450,7 +3450,7 @@ async def sync_batch(
 
                         await db.commit()
                         await db.refresh(cliente)
-                                
+                 
             elif item_type == "actualizar_producto":
 
                 producto_id = payload["id"]
