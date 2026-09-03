@@ -2095,30 +2095,59 @@ async def sync_batch(
                         company.updated_at = datetime.utcnow()
                         
             elif item_type == "crear_usuario":
-                user_uuid = UUID(payload["id"])
+
+                user_uuid = UUID(
+                    payload["id"]
+                )
 
                 q = await db.execute(
                     select(User).where(
                         User.id == user_uuid,
-                        User.empresa_uuid == payload.get("empresa_uuid")
+                        User.empresa_uuid ==
+                        payload.get("empresa_uuid")
                     )
                 )
 
-                exists = q.scalar_one_or_none()
+                exists = (
+                    q.scalar_one_or_none()
+                )
 
-                print("RAW ITEM:", item)
-                print("PAYLOAD TYPE:", type(item.get("payload")))
+                print(
+                    "RAW ITEM:",
+                    item
+                )
+
+                print(
+                    "PAYLOAD TYPE:",
+                    type(
+                        item.get("payload")
+                    )
+                )
 
                 if not exists:
 
                     user = User(
                         id=user_uuid,
-                        empresa_uuid=payload.get("empresa_uuid"),
-                        nombre=payload.get("nombre"),
-                        usuario=payload.get("usuario"),
-                        codigo=payload.get("codigo"),
-                        activo=payload.get("activo", True),
-                        permitir_nube=payload.get("permitir_nube", False),
+                        empresa_uuid=payload.get(
+                            "empresa_uuid"
+                        ),
+                        nombre=payload.get(
+                            "nombre"
+                        ),
+                        usuario=payload.get(
+                            "usuario"
+                        ),
+                        codigo=payload.get(
+                            "codigo"
+                        ),
+                        activo=payload.get(
+                            "activo",
+                            True
+                        ),
+                        permitir_nube=payload.get(
+                            "permitir_nube",
+                            False
+                        ),
                         deleted_at=None,
                     )
 
@@ -2151,23 +2180,22 @@ async def sync_batch(
                         exists.permitir_nube
                     )
 
-                    if exists.deleted_at is not None:
+                    exists.deleted_at = None
 
-                        print(
-                            "RESTAURANDO USUARIO:",
-                            exists.id
-                        )
+                    exists.sync_status = "synced"
 
-                        exists.deleted_at = None
+                    exists.updated_at = (
+                        datetime.now(timezone.utc)
+                    )
 
-                    exists.updated_at = datetime.utcnow()
-
-                    if hasattr(exists, "version"):
+                    if hasattr(
+                        exists,
+                        "version"
+                    ):
                         exists.version = (
                             exists.version or 0
                         ) + 1
-
-
+            
             elif item_type == "eliminar_usuario":
                 usuario_id = UUID(payload["id"])
 
@@ -5180,7 +5208,7 @@ async def compras_changes(
 
     return resultado
 
-@app.post("/registrar-users")
+""" @app.post("/registrar-users")
 async def register_user(
     payload: dict,
     db: AsyncSession = Depends(get_db)
@@ -5642,7 +5670,719 @@ async def register_user(
             status_code=500,
             detail=str(e)
         )
-               
+     """     
+     
+@app.post("/registrar-users")
+async def register_user(
+    payload: dict,
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+
+        print(
+            "PAYLOAD RECIBIDO:",
+            payload
+        )
+
+        nombre = str(
+            payload.get(
+                "nombre",
+                ""
+            )
+        ).strip()
+
+        usuario = str(
+            payload.get(
+                "usuario",
+                ""
+            )
+        ).strip()
+
+        contraseña = str(
+            payload.get(
+                "contraseña",
+                ""
+            )
+        ).strip()
+
+        empresa_uuid = str(
+            payload.get(
+                "empresa_uuid",
+                ""
+            )
+        ).strip()
+
+        activo = payload.get(
+            "activo",
+            True
+        )
+
+        permitir_nube = payload.get(
+            "permitir_nube",
+            False
+        )
+
+        roles = payload.get(
+            "roles",
+            []
+        )
+
+        if not isinstance(
+            roles,
+            list
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Los roles no son válidos"
+            )
+
+        if not empresa_uuid:
+            raise HTTPException(
+                status_code=400,
+                detail="Empresa requerida"
+            )
+
+        empresa = await db.execute(
+            select(Company).where(
+                Company.uuid ==
+                empresa_uuid
+            )
+        )
+
+        empresa_obj = (
+            empresa.scalar_one_or_none()
+        )
+
+        if not empresa_obj:
+            raise HTTPException(
+                status_code=404,
+                detail="La empresa no existe"
+            )
+
+        total_users = await db.execute(
+            select(
+                func.count(User.id)
+            ).where(
+                User.empresa_uuid ==
+                empresa_uuid,
+                User.deleted_at.is_(None)
+            )
+        )
+
+        cantidad_usuarios = (
+            total_users.scalar() or 0
+        )
+
+        es_primer_usuario = (
+            cantidad_usuarios == 0
+        )
+
+        print(
+            "Cantidad usuarios:",
+            cantidad_usuarios
+        )
+
+        print(
+            "Es primer usuario:",
+            es_primer_usuario
+        )
+
+        if cantidad_usuarios > 0:
+
+            token = str(
+                payload.get(
+                    "token",
+                    ""
+                )
+            ).strip()
+
+            print(
+                "TOKEN:",
+                token
+            )
+
+            if not token:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Token requerido"
+                )
+
+            usuario_actual = (
+                await verificar_token(
+                    token,
+                    db
+                )
+            )
+
+            if (
+                usuario_actual.empresa_uuid
+                != empresa_uuid
+            ):
+                raise HTTPException(
+                    status_code=403,
+                    detail="La empresa no coincide"
+                )
+
+        else:
+
+            token_tmp = str(
+                payload.get(
+                    "token_tmp",
+                    ""
+                )
+            ).strip()
+
+            print(
+                "TOKEN TEMPORAL:",
+                token_tmp
+            )
+
+            if not token_tmp:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Token temporal requerido"
+                )
+
+            try:
+
+                data = jwt.decode(
+                    token_tmp,
+                    JWT_SECRET,
+                    algorithms=[
+                        JWT_ALGORITHM
+                    ]
+                )
+
+                print(
+                    "JWT TEMPORAL:",
+                    data
+                )
+
+                if (
+                    data.get(
+                        "empresa_uuid"
+                    )
+                    != empresa_uuid
+                ):
+                    raise HTTPException(
+                        status_code=403,
+                        detail="La empresa no coincide"
+                    )
+
+            except HTTPException:
+                raise
+
+            except Exception as e:
+
+                print(
+                    "JWT ERROR:",
+                    e
+                )
+
+                raise HTTPException(
+                    status_code=401,
+                    detail="Token temporal inválido"
+                )
+
+        if not nombre:
+            raise HTTPException(
+                status_code=400,
+                detail="Nombre requerido"
+            )
+
+        if not usuario:
+            raise HTTPException(
+                status_code=400,
+                detail="Usuario requerido"
+            )
+
+        if not contraseña:
+            raise HTTPException(
+                status_code=400,
+                detail="Contraseña requerida"
+            )
+
+        existe_usuario_result = (
+            await db.execute(
+                select(User).where(
+                    User.empresa_uuid ==
+                    empresa_uuid,
+                    User.usuario ==
+                    usuario
+                )
+            )
+        )
+
+        usuario_existente = (
+            existe_usuario_result
+            .scalar_one_or_none()
+        )
+
+        usuario_restaurado = False
+
+        if usuario_existente:
+
+            if (
+                usuario_existente.deleted_at
+                is None
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="El usuario ya existe"
+                )
+
+            print(
+                "RESTAURANDO USUARIO:",
+                usuario_existente.id
+            )
+
+            usuario_restaurado = True
+
+            codigo_anterior = (
+                usuario_existente.codigo
+            )
+
+            usuario_existente.nombre = (
+                nombre
+            )
+
+            usuario_existente.usuario = (
+                usuario
+            )
+
+            usuario_existente.activo = (
+                activo
+            )
+
+            usuario_existente.permitir_nube = (
+                permitir_nube
+            )
+
+            usuario_existente.password_hash = (
+                pwd_context.hash(
+                    contraseña
+                )
+            )
+
+            usuario_existente.deleted_at = (
+                None
+            )
+
+            usuario_existente.sync_status = (
+                "synced"
+            )
+
+            usuario_existente.updated_at = (
+                datetime.now(timezone.utc)
+            )
+
+            usuario_existente.version = (
+                usuario_existente.version or 0
+            ) + 1
+
+            if codigo_anterior:
+                usuario_existente.codigo = (
+                    codigo_anterior
+                )
+
+            nuevo_usuario = (
+                usuario_existente
+            )
+
+        else:
+
+            while True:
+
+                codigo = str(
+                    random.randint(
+                        10000,
+                        99999
+                    )
+                )
+
+                existe_codigo = (
+                    await db.execute(
+                        select(User).where(
+                            User.empresa_uuid ==
+                            empresa_uuid,
+                            User.codigo ==
+                            codigo
+                        )
+                    )
+                )
+
+                if not (
+                    existe_codigo
+                    .scalar_one_or_none()
+                ):
+                    break
+
+            password_hash = (
+                pwd_context.hash(
+                    contraseña
+                )
+            )
+
+            nuevo_usuario = User(
+                empresa_uuid=empresa_uuid,
+                nombre=nombre,
+                usuario=usuario,
+                password_hash=password_hash,
+                codigo=codigo,
+                activo=activo,
+                permitir_nube=permitir_nube,
+                sync_status="synced",
+                version=1
+            )
+
+            db.add(
+                nuevo_usuario
+            )
+
+        await db.flush()
+
+        roles_ids = []
+
+        for rol_id in roles:
+
+            try:
+
+                rol_uuid = UUID(
+                    str(rol_id)
+                )
+
+            except Exception:
+
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Rol inválido: "
+                        f"{rol_id}"
+                    )
+                )
+
+            if (
+                rol_uuid
+                not in roles_ids
+            ):
+                roles_ids.append(
+                    rol_uuid
+                )
+
+        roles_obj = []
+
+        if roles_ids:
+
+            roles_result = (
+                await db.execute(
+                    select(Role).where(
+                        Role.id.in_(
+                            roles_ids
+                        ),
+                        Role.empresa_uuid ==
+                        empresa_uuid,
+                        Role.deleted_at.is_(None)
+                    )
+                )
+            )
+
+            roles_obj = (
+                roles_result
+                .scalars()
+                .all()
+            )
+
+            roles_encontrados = {
+                rol.id
+                for rol in roles_obj
+            }
+
+            roles_faltantes = [
+                str(rol_id)
+                for rol_id in roles_ids
+                if rol_id
+                not in roles_encontrados
+            ]
+
+            if roles_faltantes:
+
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        "Uno o más roles no "
+                        "existen o no pertenecen "
+                        "a la empresa: "
+                        + ", ".join(
+                            roles_faltantes
+                        )
+                    )
+                )
+
+        usuario_roles_creados = []
+
+        for rol in roles_obj:
+
+            q = await db.execute(
+                select(
+                    UsuarioRol
+                ).where(
+                    UsuarioRol.usuario_id ==
+                    nuevo_usuario.id,
+                    UsuarioRol.rol_id ==
+                    rol.id,
+                    UsuarioRol.empresa_uuid ==
+                    empresa_uuid
+                )
+            )
+
+            usuario_rol = (
+                q.scalar_one_or_none()
+            )
+
+            if not usuario_rol:
+
+                usuario_rol = UsuarioRol(
+                    usuario_id=
+                        nuevo_usuario.id,
+                    rol_id=rol.id,
+                    empresa_uuid=
+                        empresa_uuid,
+                    version=1,
+                    sync_status="synced",
+                    deleted_at=None
+                )
+
+                db.add(
+                    usuario_rol
+                )
+
+                await db.flush()
+
+            else:
+
+                usuario_rol.deleted_at = (
+                    None
+                )
+
+                usuario_rol.sync_status = (
+                    "synced"
+                )
+
+                usuario_rol.version = (
+                    usuario_rol.version or 0
+                ) + 1
+
+                usuario_rol.updated_at = (
+                    datetime.now(
+                        timezone.utc
+                    )
+                )
+
+                await db.flush()
+
+            usuario_roles_creados.append(
+                {
+                    "usuario_id": str(
+                        nuevo_usuario.id
+                    ),
+                    "rol_id": str(
+                        rol.id
+                    ),
+                    "empresa_uuid":
+                        empresa_uuid,
+                    "version":
+                        usuario_rol.version
+                }
+            )
+
+        roles_ids_set = {
+            rol.id
+            for rol in roles_obj
+        }
+
+        roles_usuario_result = (
+            await db.execute(
+                select(
+                    UsuarioRol
+                ).where(
+                    UsuarioRol.usuario_id ==
+                    nuevo_usuario.id,
+                    UsuarioRol.empresa_uuid ==
+                    empresa_uuid,
+                    UsuarioRol.deleted_at.is_(None)
+                )
+            )
+        )
+
+        roles_usuario_actuales = (
+            roles_usuario_result
+            .scalars()
+            .all()
+        )
+
+        for usuario_rol_actual in (
+            roles_usuario_actuales
+        ):
+
+            if (
+                usuario_rol_actual.rol_id
+                not in roles_ids_set
+            ):
+
+                usuario_rol_actual.deleted_at = (
+                    datetime.now(
+                        timezone.utc
+                    )
+                )
+
+                usuario_rol_actual.sync_status = (
+                    "synced"
+                )
+
+                usuario_rol_actual.version = (
+                    usuario_rol_actual.version or 0
+                ) + 1
+
+                usuario_rol_actual.updated_at = (
+                    datetime.now(
+                        timezone.utc
+                    )
+                )
+
+                await db.flush()
+
+        await db.commit()
+
+        eventos_ws = []
+
+        if not es_primer_usuario:
+
+            eventos_ws.append(
+                {
+                    "tipo":
+                        "usuario_actualizado",
+
+                    "accion": (
+                        "restaurar_usuario"
+                        if usuario_restaurado
+                        else "crear_usuario"
+                    ),
+
+                    "empresa_uuid":
+                        str(
+                            empresa_uuid
+                        ),
+
+                    "usuario_id":
+                        str(
+                            nuevo_usuario.id
+                        ),
+
+                    "version":
+                        nuevo_usuario.version
+                }
+            )
+
+        await db.refresh(
+            nuevo_usuario
+        )
+
+        for evento in eventos_ws:
+
+            await enviar_evento(
+                evento[
+                    "empresa_uuid"
+                ],
+                evento
+            )
+
+        return {
+            "ok": True,
+
+            "id": str(
+                nuevo_usuario.id
+            ),
+
+            "empresa_uuid":
+                nuevo_usuario.empresa_uuid,
+
+            "nombre":
+                nuevo_usuario.nombre,
+
+            "usuario":
+                nuevo_usuario.usuario,
+
+            "codigo":
+                nuevo_usuario.codigo,
+
+            "activo":
+                nuevo_usuario.activo,
+
+            "permitir_nube":
+                nuevo_usuario.permitir_nube,
+
+            "sync_status":
+                nuevo_usuario.sync_status,
+
+            "version":
+                nuevo_usuario.version,
+
+            "created_at": (
+                nuevo_usuario.created_at.isoformat()
+                if nuevo_usuario.created_at
+                else None
+            ),
+
+            "updated_at": (
+                nuevo_usuario.updated_at.isoformat()
+                if nuevo_usuario.updated_at
+                else None
+            ),
+
+            "primer_usuario":
+                es_primer_usuario,
+
+            "restaurado":
+                usuario_restaurado,
+
+            "roles": [
+                {
+                    "id": str(
+                        rol.id
+                    ),
+                    "nombre":
+                        rol.nombre,
+                    "nivel":
+                        rol.nivel,
+                    "descripcion":
+                        rol.descripcion
+                }
+                for rol in roles_obj
+            ],
+
+            "usuario_roles":
+                usuario_roles_creados
+        }
+
+    except HTTPException:
+
+        await db.rollback()
+        raise
+
+    except Exception as e:
+
+        await db.rollback()
+
+        print(
+            "ERROR REGISTER USERs:",
+            repr(e)
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+      
 @app.post("/login-user")
 async def login_user(
     payload: dict,
