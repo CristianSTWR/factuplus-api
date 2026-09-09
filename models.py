@@ -868,10 +868,10 @@ class Pago(Base):
 
     __tablename__ = "pagos"
 
-    id: Mapped[int] = mapped_column(
-        Integer,
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
         primary_key=True,
-        autoincrement=True,
+        default=uuid4,
         index=True
     )
 
