@@ -2762,7 +2762,7 @@ async def sync_batch(
                         if payload.get("usuario_id")
                         else None,
 
-                        venta_id=int(payload["venta_id"])
+                        venta_id = UUID(payload["venta_id"])
                         if payload.get("venta_id") is not None
                         else None,
 
