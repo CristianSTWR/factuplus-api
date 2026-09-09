@@ -2027,9 +2027,11 @@ async def sync_batch(
                 "crear_usuario": 5,
                 "crear_caja": 6,
                 "asignar_caja": 7,
-                "crear_movimiento_caja": 8,
-                "cerrar_caja": 9,
-                "crear_producto": 10,
+                "crear_cliente": 8,
+                "crear_producto": 9,
+                "crear_venta": 10,
+                "crear_movimiento_caja": 11,
+                "cerrar_caja": 12,
             }.get(x["type"], 999)
         )
                 
@@ -2753,62 +2755,47 @@ async def sync_batch(
 
                     movimiento = CajaMovimiento(
                         id=movimiento_id,
-
                         empresa_uuid=payload.get("empresa_uuid"),
-
                         caja_id=UUID(payload["caja_id"]),
-
                         usuario_id=UUID(payload["usuario_id"])
                         if payload.get("usuario_id")
                         else None,
-
-                        venta_id = UUID(payload["venta_id"])
-                        if payload.get("venta_id") is not None
+                        venta_id=UUID(payload["venta_id"])
+                        if payload.get("venta_id")
                         else None,
-
                         tipo=payload.get("tipo"),
-
                         monto=Decimal(
                             str(payload.get("monto", 0))
                         ),
-
                         descripcion=payload.get("descripcion"),
-
-                        solicitado_por=UUID(
-                            payload["solicitado_por"]
-                        )
+                        solicitado_por=UUID(payload["solicitado_por"])
                         if payload.get("solicitado_por")
                         else None,
-
-                        autorizado_por=UUID(
-                            payload["autorizado_por"]
-                        )
+                        autorizado_por=UUID(payload["autorizado_por"])
                         if payload.get("autorizado_por")
                         else None,
-
                         requiere_autorizacion=bool(
                             payload.get(
                                 "requiere_autorizacion",
                                 False
                             )
                         ),
-
                         estado_autorizacion=payload.get(
                             "estado_autorizacion",
                             "no_requiere"
                         ),
-
                         fecha_autorizacion=parse_datetime(
                             payload.get("fecha_autorizacion")
                         )
                         if payload.get("fecha_autorizacion")
                         else None,
-
                         sync_status=payload.get(
                             "sync_status",
                             "synced"
                         )
                     )
+
+                    db.add(movimiento)
 
                     db.add(movimiento)
                     
