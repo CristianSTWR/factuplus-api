@@ -2517,7 +2517,9 @@ async def sync_batch(
                         if payload.get("usuario_id")
                         else None,
 
-                        venta_id=payload.get("venta_id"),
+                        venta_id=int(payload["venta_id"])
+                        if payload.get("venta_id") is not None
+                        else None,
 
                         tipo=payload.get("tipo"),
 
@@ -2562,11 +2564,6 @@ async def sync_batch(
                             "synced"
                         )
                     )
-
-                    """ print(
-                        "MOVIMIENTO PAYLOAD:",
-                        payload
-                    ) """
 
                     db.add(movimiento)
                     
