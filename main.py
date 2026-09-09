@@ -2539,17 +2539,17 @@ async def sync_batch(
                             "tipo_pago"
                         ),
 
-                        fecha=parse_datetime(
-                            payload.get("fecha")
-                        )
-                        if payload.get("fecha")
-                        else None,
+                        fecha=(
+                            parse_datetime(payload["fecha"])
+                            if payload.get("fecha")
+                            else None
+                        ),
 
-                        fecha_vencimiento=parse_datetime(
-                            payload.get("fecha_vencimiento")
-                        )
-                        if payload.get("fecha_vencimiento")
-                        else None,
+                        fecha_vencimiento=(
+                            parse_datetime(payload["fecha_vencimiento"])
+                            if payload.get("fecha_vencimiento")
+                            else None
+                        ),
 
                         estado=payload.get(
                             "estado",
@@ -2574,11 +2574,11 @@ async def sync_batch(
                             1
                         ),
 
-                        deleted_at=parse_datetime(
-                            payload.get("deleted_at")
+                        deleted_at=(
+                            parse_datetime(payload["deleted_at"])
+                            if payload.get("deleted_at")
+                            else None
                         )
-                        if payload.get("deleted_at")
-                        else None
                     )
 
                     db.add(venta)
