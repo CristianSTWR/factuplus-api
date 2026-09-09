@@ -755,13 +755,13 @@ class Venta(Base):
     )
 
     fecha: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP")
     )
 
     fecha_vencimiento: Mapped[datetime | None] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=True
     )
 
