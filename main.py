@@ -75,7 +75,7 @@ import httpx
 import re
 # APLICACION
 from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, Producto, UnidadMedida, Rol, RolPermiso, UsuarioRol, MetodoPago, Cliente, Suplidor
-from models import Compra, CompraDetalle
+from models import Compra, CompraDetalle, VentaDetalle, Pago
 
 # WEB
 from models import ListaEspera, EmpresaDispositivo
@@ -2488,6 +2488,251 @@ async def sync_batch(
 
                         await db.commit()
                         await db.refresh(caja)
+                        
+            elif item_type == "crear_venta":
+
+                venta_id = UUID(payload["id"])
+
+                q = await db.execute(
+                    select(Venta).where(
+                        Venta.id == venta_id,
+                        Venta.empresa_uuid == payload.get("empresa_uuid")
+                    )
+                )
+
+                exists = q.scalar_one_or_none()
+
+                if not exists:
+
+                    venta = Venta(
+                        id=venta_id,
+
+                        empresa_uuid=payload.get(
+                            "empresa_uuid"
+                        ),
+
+                        cliente_id=UUID(
+                            payload["cliente_id"]
+                        )
+                        if payload.get("cliente_id")
+                        else None,
+
+                        total=Decimal(
+                            str(payload.get("total", 0))
+                        ),
+
+                        monto_pagado=Decimal(
+                            str(payload.get("monto_pagado", 0))
+                        ),
+
+                        monto_pendiente=Decimal(
+                            str(payload.get("monto_pendiente", 0))
+                        ),
+
+                        cambio=Decimal(
+                            str(payload.get("cambio", 0))
+                        ),
+
+                        tipo_pago=payload.get(
+                            "tipo_pago"
+                        ),
+
+                        fecha=parse_datetime(
+                            payload.get("fecha")
+                        )
+                        if payload.get("fecha")
+                        else None,
+
+                        fecha_vencimiento=parse_datetime(
+                            payload.get("fecha_vencimiento")
+                        )
+                        if payload.get("fecha_vencimiento")
+                        else None,
+
+                        estado=payload.get(
+                            "estado",
+                            "pendiente"
+                        ),
+
+                        observacion=payload.get(
+                            "observacion"
+                        ),
+
+                        motivo_anulacion=payload.get(
+                            "motivo_anulacion"
+                        ),
+
+                        sync_status=payload.get(
+                            "sync_status",
+                            "synced"
+                        ),
+
+                        version=payload.get(
+                            "version",
+                            1
+                        ),
+
+                        deleted_at=parse_datetime(
+                            payload.get("deleted_at")
+                        )
+                        if payload.get("deleted_at")
+                        else None
+                    )
+
+                    db.add(venta)
+
+                    await db.flush()
+
+                    for detalle_payload in payload.get(
+                        "detalles",
+                        []
+                    ):
+
+                        detalle_id = UUID(
+                            detalle_payload["id"]
+                        )
+
+                        q_detalle = await db.execute(
+                            select(VentaDetalle).where(
+                                VentaDetalle.id == detalle_id,
+                                VentaDetalle.empresa_uuid ==
+                                payload.get("empresa_uuid")
+                            )
+                        )
+
+                        detalle_exists = (
+                            q_detalle.scalar_one_or_none()
+                        )
+
+                        if not detalle_exists:
+
+                            detalle = VentaDetalle(
+                                id=detalle_id,
+
+                                empresa_uuid=detalle_payload.get(
+                                    "empresa_uuid"
+                                ),
+
+                                venta_id=venta_id,
+
+                                producto_id=UUID(
+                                    detalle_payload[
+                                        "producto_id"
+                                    ]
+                                ),
+
+                                cantidad=Decimal(
+                                    str(
+                                        detalle_payload.get(
+                                            "cantidad",
+                                            0
+                                        )
+                                    )
+                                ),
+
+                                precio_unitario=Decimal(
+                                    str(
+                                        detalle_payload.get(
+                                            "precio_unitario",
+                                            0
+                                        )
+                                    )
+                                ),
+
+                                subtotal=Decimal(
+                                    str(
+                                        detalle_payload.get(
+                                            "subtotal",
+                                            0
+                                        )
+                                    )
+                                ),
+
+                                sync_status=detalle_payload.get(
+                                    "sync_status",
+                                    "synced"
+                                ),
+
+                                version=detalle_payload.get(
+                                    "version",
+                                    1
+                                ),
+
+                                deleted_at=parse_datetime(
+                                    detalle_payload.get(
+                                        "deleted_at"
+                                    )
+                                )
+                                if detalle_payload.get(
+                                    "deleted_at"
+                                )
+                                else None
+                            )
+
+                            db.add(detalle)
+
+                    for pago_payload in payload.get(
+                        "pagos",
+                        []
+                    ):
+
+                        pago_id = UUID(
+                            pago_payload["id"]
+                        )
+
+                        q_pago = await db.execute(
+                            select(Pago).where(
+                                Pago.id == pago_id
+                            )
+                        )
+
+                        pago_exists = (
+                            q_pago.scalar_one_or_none()
+                        )
+
+                        if not pago_exists:
+
+                            pago = Pago(
+                                id=pago_id,
+
+                                cliente_id=UUID(
+                                    pago_payload[
+                                        "cliente_id"
+                                    ]
+                                )
+                                if pago_payload.get(
+                                    "cliente_id"
+                                )
+                                else None,
+
+                                venta_id=venta_id,
+
+                                metodo_pago_id=UUID(
+                                    pago_payload[
+                                        "metodo_pago_id"
+                                    ]
+                                ),
+
+                                monto=Decimal(
+                                    str(
+                                        pago_payload.get(
+                                            "monto",
+                                            0
+                                        )
+                                    )
+                                ),
+
+                                observacion=pago_payload.get(
+                                    "observacion"
+                                ),
+
+                                estado=pago_payload.get(
+                                    "estado",
+                                    "aprobado"
+                                )
+                            )
+
+                            db.add(pago)
                         
             elif item_type == "crear_movimiento_caja":
 
