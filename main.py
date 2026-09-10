@@ -2492,13 +2492,19 @@ async def sync_batch(
                         await db.refresh(caja)
                         
             elif item_type == "crear_venta":
-
                 venta_id = UUID(payload["id"])
+
+                empresa_uuid = payload.get("empresa_uuid")
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "La venta no contiene empresa_uuid"
+                    )
 
                 q = await db.execute(
                     select(Venta).where(
                         Venta.id == venta_id,
-                        Venta.empresa_uuid == payload.get("empresa_uuid")
+                        Venta.empresa_uuid == empresa_uuid
                     )
                 )
 
@@ -2509,9 +2515,7 @@ async def sync_batch(
                     venta = Venta(
                         id=venta_id,
 
-                        empresa_uuid=payload.get(
-                            "empresa_uuid"
-                        ),
+                        empresa_uuid=empresa_uuid,
 
                         cliente_id=UUID(
                             payload["cliente_id"]
@@ -2546,7 +2550,9 @@ async def sync_batch(
                         ),
 
                         fecha_vencimiento=(
-                            parse_datetime(payload["fecha_vencimiento"])
+                            parse_datetime(
+                                payload["fecha_vencimiento"]
+                            )
                             if payload.get("fecha_vencimiento")
                             else None
                         ),
@@ -2575,7 +2581,9 @@ async def sync_batch(
                         ),
 
                         deleted_at=(
-                            parse_datetime(payload["deleted_at"])
+                            parse_datetime(
+                                payload["deleted_at"]
+                            )
                             if payload.get("deleted_at")
                             else None
                         )
@@ -2597,8 +2605,7 @@ async def sync_batch(
                         q_detalle = await db.execute(
                             select(VentaDetalle).where(
                                 VentaDetalle.id == detalle_id,
-                                VentaDetalle.empresa_uuid ==
-                                payload.get("empresa_uuid")
+                                VentaDetalle.empresa_uuid == empresa_uuid
                             )
                         )
 
@@ -2611,9 +2618,7 @@ async def sync_batch(
                             detalle = VentaDetalle(
                                 id=detalle_id,
 
-                                empresa_uuid=detalle_payload.get(
-                                    "empresa_uuid"
-                                ),
+                                empresa_uuid=empresa_uuid,
 
                                 venta_id=venta_id,
 
@@ -2660,15 +2665,17 @@ async def sync_batch(
                                     1
                                 ),
 
-                                deleted_at=parse_datetime(
-                                    detalle_payload.get(
+                                deleted_at=(
+                                    parse_datetime(
+                                        detalle_payload.get(
+                                            "deleted_at"
+                                        )
+                                    )
+                                    if detalle_payload.get(
                                         "deleted_at"
                                     )
+                                    else None
                                 )
-                                if detalle_payload.get(
-                                    "deleted_at"
-                                )
-                                else None
                             )
 
                             db.add(detalle)
@@ -2678,17 +2685,14 @@ async def sync_batch(
                         []
                     ):
 
-                        empresa_uuid = str(
-                            pago_payload["empresa_uuid"]
-                        )
-                        
                         pago_id = UUID(
                             pago_payload["id"]
                         )
 
                         q_pago = await db.execute(
                             select(Pago).where(
-                                Pago.id == pago_id
+                                Pago.id == pago_id,
+                                Pago.empresa_uuid == empresa_uuid
                             )
                         )
 
@@ -2700,6 +2704,8 @@ async def sync_batch(
 
                             pago = Pago(
                                 id=pago_id,
+
+                                empresa_uuid=empresa_uuid,
 
                                 cliente_id=UUID(
                                     pago_payload[
@@ -2738,8 +2744,7 @@ async def sync_batch(
                                 )
                             )
 
-                            db.add(pago)
-                        
+                            db.add(pago)          
             elif item_type == "crear_movimiento_caja":
 
                 movimiento_id = UUID(payload["id"])
