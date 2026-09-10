@@ -874,6 +874,12 @@ class Pago(Base):
         default=uuid4,
         index=True
     )
+    
+    empresa_uuid: Mapped[str] = mapped_column(
+        String(36),
+        nullable=False,
+        index=True
+    )
 
     cliente_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),

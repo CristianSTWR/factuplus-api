@@ -2678,6 +2678,10 @@ async def sync_batch(
                         []
                     ):
 
+                        empresa_uuid = str(
+                            pago_payload["empresa_uuid"]
+                        )
+                        
                         pago_id = UUID(
                             pago_payload["id"]
                         )
@@ -4797,6 +4801,110 @@ async def ventas_changes(
             for v in ventas
         ],
         "has_more": len(ventas) == limit
+    }
+
+
+
+@app.get("/sync/venta-detalles/changes")
+async def venta_detalles_changes(
+    empresa_uuid: str,
+    since: str | None = None,
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(VentaDetalle).where(
+        VentaDetalle.empresa_uuid == empresa_uuid
+    )
+
+    if since:
+
+        since_dt = parser.isoparse(since)
+
+        if since_dt.tzinfo:
+            since_dt = since_dt.replace(
+                tzinfo=None
+            )
+
+        query = query.where(
+            VentaDetalle.updated_at > since_dt
+        )
+
+    query = query.order_by(
+        VentaDetalle.updated_at.asc()
+    )
+
+    query = query.limit(limit).offset(offset)
+
+    result = await db.execute(query)
+
+    detalles = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(d.id),
+                "empresa_uuid": d.empresa_uuid,
+
+                "venta_id":
+                    str(d.venta_id)
+                    if d.venta_id
+                    else None,
+
+                "producto_id":
+                    str(d.producto_id),
+
+                "cantidad":
+                    float(d.cantidad or 0),
+
+                "precio_unitario":
+                    float(d.precio_unitario or 0),
+
+                "subtotal":
+                    float(d.subtotal or 0),
+
+                "sync_status":
+                    d.sync_status,
+
+                "version":
+                    d.version,
+
+                "deleted_at":
+                    d.deleted_at.isoformat()
+                    if d.deleted_at
+                    else None,
+
+                "created_at":
+                    d.created_at.isoformat()
+                    if d.created_at
+                    else None,
+
+                "updated_at":
+                    d.updated_at.isoformat()
+                    if d.updated_at
+                    else None
+            }
+            for d in detalles
+        ],
+        "has_more": len(detalles) == limit
     }
 
 @app.get("/sync/unidades_medida/changes")
@@ -8446,6 +8554,98 @@ async def restore_productos_changes(
             for p in productos
         ],
         "has_more": len(productos) == limit
+    }
+
+@app.get("/restore/venta-detalles/changes")
+async def restore_venta_detalles_changes(
+    empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(VentaDetalle)
+        .where(
+            VentaDetalle.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            VentaDetalle.updated_at.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    detalles = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(d.id),
+
+                "empresa_uuid":
+                    d.empresa_uuid,
+
+                "venta_id":
+                    str(d.venta_id)
+                    if d.venta_id
+                    else None,
+
+                "producto_id":
+                    str(d.producto_id),
+
+                "cantidad":
+                    float(d.cantidad or 0),
+
+                "precio_unitario":
+                    float(d.precio_unitario or 0),
+
+                "subtotal":
+                    float(d.subtotal or 0),
+
+                "sync_status":
+                    d.sync_status,
+
+                "version":
+                    d.version,
+
+                "updated_at":
+                    d.updated_at.isoformat()
+                    if d.updated_at
+                    else None,
+
+                "created_at":
+                    d.created_at.isoformat()
+                    if d.created_at
+                    else None,
+
+                "deleted_at":
+                    d.deleted_at.isoformat()
+                    if d.deleted_at
+                    else None
+            }
+            for d in detalles
+        ],
+        "has_more": len(detalles) == limit
     }
 
 @app.get("/restore/ventas/changes")
