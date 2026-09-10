@@ -4675,6 +4675,130 @@ async def productos_changes(
         "has_more": len(productos) == limit
     }
 
+@app.get("/sync/ventas/changes")
+async def ventas_changes(
+    empresa_uuid: str,
+    since: str | None = None,
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(Venta).where(
+        Venta.empresa_uuid == empresa_uuid
+    )
+
+    if since:
+
+        since_dt = parser.isoparse(since)
+
+        if since_dt.tzinfo:
+            since_dt = since_dt.replace(
+                tzinfo=None
+            )
+
+        query = query.where(
+            Venta.updated_at > since_dt
+        )
+
+    query = query.order_by(
+        Venta.updated_at.asc()
+    )
+
+    query = query.limit(limit).offset(offset)
+
+    result = await db.execute(query)
+
+    ventas = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(v.id),
+                "empresa_uuid": v.empresa_uuid,
+
+                "cliente_id":
+                    str(v.cliente_id)
+                    if v.cliente_id
+                    else None,
+
+                "total":
+                    float(v.total or 0),
+
+                "monto_pagado":
+                    float(v.monto_pagado or 0),
+
+                "monto_pendiente":
+                    float(v.monto_pendiente or 0),
+
+                "cambio":
+                    float(v.cambio or 0),
+
+                "sync_status":
+                    v.sync_status,
+
+                "version":
+                    v.version,
+
+                "observacion":
+                    v.observacion,
+
+                "motivo_anulacion":
+                    v.motivo_anulacion,
+
+                "tipo_pago":
+                    v.tipo_pago,
+
+                "fecha":
+                    v.fecha.isoformat()
+                    if v.fecha
+                    else None,
+
+                "fecha_vencimiento":
+                    v.fecha_vencimiento.isoformat()
+                    if v.fecha_vencimiento
+                    else None,
+
+                "estado":
+                    v.estado,
+
+                "deleted_at":
+                    v.deleted_at.isoformat()
+                    if v.deleted_at
+                    else None,
+
+                "created_at":
+                    v.created_at.isoformat()
+                    if v.created_at
+                    else None,
+
+                "updated_at":
+                    v.updated_at.isoformat()
+                    if v.updated_at
+                    else None
+            }
+            for v in ventas
+        ],
+        "has_more": len(ventas) == limit
+    }
+
 @app.get("/sync/unidades_medida/changes")
 async def unidades_medida_changes(
     empresa_uuid: str,
@@ -8323,7 +8447,121 @@ async def restore_productos_changes(
         ],
         "has_more": len(productos) == limit
     }
-    
+
+@app.get("/restore/ventas/changes")
+async def restore_ventas_changes(
+    empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(Venta)
+        .where(
+            Venta.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            Venta.updated_at.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    ventas = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(v.id),
+
+                "empresa_uuid":
+                    v.empresa_uuid,
+
+                "cliente_id":
+                    str(v.cliente_id)
+                    if v.cliente_id
+                    else None,
+
+                "total":
+                    float(v.total or 0),
+
+                "monto_pagado":
+                    float(v.monto_pagado or 0),
+
+                "monto_pendiente":
+                    float(v.monto_pendiente or 0),
+
+                "cambio":
+                    float(v.cambio or 0),
+
+                "sync_status":
+                    v.sync_status,
+
+                "version":
+                    v.version,
+
+                "observacion":
+                    v.observacion,
+
+                "motivo_anulacion":
+                    v.motivo_anulacion,
+
+                "tipo_pago":
+                    v.tipo_pago,
+
+                "fecha":
+                    v.fecha.isoformat()
+                    if v.fecha
+                    else None,
+
+                "fecha_vencimiento":
+                    v.fecha_vencimiento.isoformat()
+                    if v.fecha_vencimiento
+                    else None,
+
+                "estado":
+                    v.estado,
+
+                "deleted_at":
+                    v.deleted_at.isoformat()
+                    if v.deleted_at
+                    else None,
+
+                "updated_at":
+                    v.updated_at.isoformat()
+                    if v.updated_at
+                    else None,
+
+                "created_at":
+                    v.created_at.isoformat()
+                    if v.created_at
+                    else None
+            }
+            for v in ventas
+        ],
+        "has_more": len(ventas) == limit
+    }
+
 @app.get("/restore/unidades_medida/changes")
 async def restore_unidades_medida_changes(
     empresa_uuid: str,
