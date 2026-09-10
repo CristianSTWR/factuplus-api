@@ -4808,7 +4808,127 @@ async def ventas_changes(
         "has_more": len(ventas) == limit
     }
 
+@app.get("/sync/pagos/changes")
+async def pagos_changes(
+    empresa_uuid: str,
+    since: str | None = None,
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
 
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(Pago).where(
+        Pago.empresa_uuid == empresa_uuid
+    )
+
+    if since:
+
+        since_dt = parser.isoparse(since)
+
+        if since_dt.tzinfo:
+            since_dt = since_dt.replace(
+                tzinfo=None
+            )
+
+        query = query.where(
+            Pago.updated_at > since_dt
+        )
+
+    query = query.order_by(
+        Pago.updated_at.asc()
+    )
+
+    query = query.limit(limit).offset(offset)
+
+    result = await db.execute(query)
+
+    pagos = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(p.id),
+                "empresa_uuid": p.empresa_uuid,
+
+                "cliente_id":
+                    str(p.cliente_id)
+                    if p.cliente_id
+                    else None,
+
+                "venta_id":
+                    str(p.venta_id),
+
+                "metodo_pago_id":
+                    str(p.metodo_pago_id),
+
+                "monto":
+                    float(p.monto or 0),
+
+                "referencia":
+                    p.referencia,
+
+                "autorizacion":
+                    p.autorizacion,
+
+                "ultimos_4":
+                    p.ultimos_4,
+
+                "banco":
+                    p.banco,
+
+                "observacion":
+                    p.observacion,
+
+                "estado":
+                    p.estado,
+
+                "fecha":
+                    p.fecha.isoformat()
+                    if p.fecha
+                    else None,
+
+                "sync_status":
+                    p.sync_status,
+
+                "version":
+                    p.version,
+
+                "deleted_at":
+                    p.deleted_at.isoformat()
+                    if p.deleted_at
+                    else None,
+
+                "created_at":
+                    p.created_at.isoformat()
+                    if p.created_at
+                    else None,
+
+                "updated_at":
+                    p.updated_at.isoformat()
+                    if p.updated_at
+                    else None
+            }
+            for p in pagos
+        ],
+        "has_more": len(pagos) == limit
+    }
 
 @app.get("/sync/venta-detalles/changes")
 async def venta_detalles_changes(
@@ -8559,6 +8679,118 @@ async def restore_productos_changes(
             for p in productos
         ],
         "has_more": len(productos) == limit
+    }
+
+@app.get("/restore/pagos/changes")
+async def restore_pagos_changes(
+    empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(Pago)
+        .where(
+            Pago.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            Pago.updated_at.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    pagos = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(p.id),
+
+                "empresa_uuid":
+                    p.empresa_uuid,
+
+                "cliente_id":
+                    str(p.cliente_id)
+                    if p.cliente_id
+                    else None,
+
+                "venta_id":
+                    str(p.venta_id),
+
+                "metodo_pago_id":
+                    str(p.metodo_pago_id),
+
+                "monto":
+                    float(p.monto or 0),
+
+                "referencia":
+                    p.referencia,
+
+                "autorizacion":
+                    p.autorizacion,
+
+                "ultimos_4":
+                    p.ultimos_4,
+
+                "banco":
+                    p.banco,
+
+                "observacion":
+                    p.observacion,
+
+                "estado":
+                    p.estado,
+
+                "fecha":
+                    p.fecha.isoformat()
+                    if p.fecha
+                    else None,
+
+                "sync_status":
+                    p.sync_status,
+
+                "version":
+                    p.version,
+
+                "updated_at":
+                    p.updated_at.isoformat()
+                    if p.updated_at
+                    else None,
+
+                "created_at":
+                    p.created_at.isoformat()
+                    if p.created_at
+                    else None,
+
+                "deleted_at":
+                    p.deleted_at.isoformat()
+                    if p.deleted_at
+                    else None
+            }
+            for p in pagos
+        ],
+        "has_more": len(pagos) == limit
     }
 
 @app.get("/restore/venta-detalles/changes")
