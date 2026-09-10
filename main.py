@@ -6336,6 +6336,8 @@ async def register_user(
                 detail="Los roles no son válidos"
             )
 
+        roles = list(roles)
+
         if not empresa_uuid:
             raise HTTPException(
                 status_code=400,
@@ -6626,6 +6628,87 @@ async def register_user(
 
         await db.flush()
 
+        if es_primer_usuario:
+
+            print(
+                "PRIMER USUARIO: BUSCANDO ROL ADMINISTRADOR"
+            )
+
+            rol_admin_result = await db.execute(
+                select(Rol).where(
+                    Rol.empresa_uuid ==
+                    empresa_uuid,
+                    Rol.nombre ==
+                    "Administrador",
+                    Rol.deleted_at.is_(None)
+                )
+            )
+
+            rol_admin = (
+                rol_admin_result
+                .scalar_one_or_none()
+            )
+
+            if not rol_admin:
+
+                print(
+                    "ROL ADMINISTRADOR NO EXISTE: CREANDO"
+                )
+
+                rol_admin = Rol(
+                    empresa_uuid=empresa_uuid,
+                    nombre="Administrador",
+                    descripcion="Acceso total",
+                    nivel=1,
+                    sync_status="synced",
+                    version=1
+                )
+
+                db.add(
+                    rol_admin
+                )
+
+                await db.flush()
+
+                print(
+                    "ROL ADMINISTRADOR CREADO:",
+                    rol_admin.id
+                )
+
+            else:
+
+                print(
+                    "ROL ADMINISTRADOR ENCONTRADO:",
+                    rol_admin.id
+                )
+
+            rol_admin_id = rol_admin.id
+
+            ya_tiene_admin = False
+
+            for rol_id in roles:
+
+                try:
+                    if (
+                        UUID(str(rol_id))
+                        == rol_admin_id
+                    ):
+                        ya_tiene_admin = True
+                        break
+                except Exception:
+                    continue
+
+            if not ya_tiene_admin:
+
+                roles.append(
+                    rol_admin_id
+                )
+
+                print(
+                    "ADMINISTRADOR AGREGADO A ROLES:",
+                    rol_admin_id
+                )
+
         roles_ids = []
 
         for rol_id in roles:
@@ -6653,6 +6736,14 @@ async def register_user(
                 roles_ids.append(
                     rol_uuid
                 )
+
+        print(
+            "ROLES IDS FINALES:",
+            [
+                str(rol_id)
+                for rol_id in roles_ids
+            ]
+        )
 
         roles_obj = []
 
@@ -6701,6 +6792,17 @@ async def register_user(
                     )
                 )
 
+        print(
+            "ROLES OBJ FINALES:",
+            [
+                {
+                    "id": str(rol.id),
+                    "nombre": rol.nombre
+                }
+                for rol in roles_obj
+            ]
+        )
+
         usuario_roles_creados = []
 
         for rol in roles_obj:
@@ -6742,6 +6844,22 @@ async def register_user(
 
                 await db.flush()
 
+                print(
+                    "USUARIO_ROL CREADO:",
+                    {
+                        "usuario_id":
+                            str(
+                                nuevo_usuario.id
+                            ),
+                        "rol_id":
+                            str(
+                                rol.id
+                            ),
+                        "rol":
+                            rol.nombre
+                    }
+                )
+
             else:
 
                 usuario_rol.deleted_at = None
@@ -6761,6 +6879,22 @@ async def register_user(
                 )
 
                 await db.flush()
+
+                print(
+                    "USUARIO_ROL RESTAURADO:",
+                    {
+                        "usuario_id":
+                            str(
+                                nuevo_usuario.id
+                            ),
+                        "rol_id":
+                            str(
+                                rol.id
+                            ),
+                        "rol":
+                            rol.nombre
+                    }
+                )
 
             usuario_roles_creados.append(
                 {
@@ -6963,7 +7097,9 @@ async def register_user(
         raise HTTPException(
             status_code=500,
             detail=str(e)
-        )    
+        )      
+        
+        
 @app.post("/login-user")
 async def login_user(
     payload: dict,
