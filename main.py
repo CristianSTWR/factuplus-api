@@ -5498,11 +5498,10 @@ async def metodos_pago_changes(
     return {
         "items": [
             {
-                "id":
-                    str(mp.id),
+                "id": str(mp.id),
 
                 "empresa_uuid":
-                    str(mp.empresa_uuid),
+                    mp.empresa_uuid,
 
                 "nombre":
                     mp.nombre,
@@ -5510,27 +5509,26 @@ async def metodos_pago_changes(
                 "activo":
                     mp.activo,
 
-                "sync_status":
-                    mp.sync_status,
-
-                "version":
-                    mp.version,
+                "created_at":
+                    mp.created_at.isoformat()
+                    if mp.created_at
+                    else None,
 
                 "updated_at":
                     mp.updated_at.isoformat()
                     if mp.updated_at
                     else None,
 
-                "created_at":
-                    mp.created_at.isoformat()
-                    if mp.created_at
-                    else None
+                "sync_status":
+                    mp.sync_status,
+
+                "version":
+                    mp.version
             }
             for mp in metodos_pago
         ],
         "has_more": len(metodos_pago) == limit
-    }
-    
+    }  
 @app.get("/sync/clientes/changes")
 async def clientes_changes(
     authorization: str = Header(None),
@@ -9097,6 +9095,82 @@ async def restore_unidades_medida_changes(
             for u in unidades
         ],
         "has_more": len(unidades) == limit
+    }
+
+@app.get("/restore/metodos-pago/changes")
+async def restore_metodos_pago_changes(
+    empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(MetodoPago)
+        .where(
+            MetodoPago.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            MetodoPago.updated_at.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    metodos_pago = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(mp.id),
+
+                "empresa_uuid":
+                    mp.empresa_uuid,
+
+                "nombre":
+                    mp.nombre,
+
+                "activo":
+                    mp.activo,
+
+                "created_at":
+                    mp.created_at.isoformat()
+                    if mp.created_at
+                    else None,
+
+                "updated_at":
+                    mp.updated_at.isoformat()
+                    if mp.updated_at
+                    else None,
+
+                "sync_status":
+                    mp.sync_status,
+
+                "version":
+                    mp.version
+            }
+            for mp in metodos_pago
+        ],
+        "has_more": len(metodos_pago) == limit
     }
     
 from pydantic import BaseModel
