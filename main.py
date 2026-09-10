@@ -2492,6 +2492,7 @@ async def sync_batch(
                         await db.refresh(caja)
                         
             elif item_type == "crear_venta":
+
                 venta_id = UUID(payload["id"])
 
                 empresa_uuid = payload.get("empresa_uuid")
@@ -2744,7 +2745,22 @@ async def sync_batch(
                                 )
                             )
 
-                            db.add(pago)          
+                            db.add(pago)
+
+                    await db.flush()
+
+                    eventos_ws.append({
+                        "tipo": "venta_actualizada",
+                        "accion": "crear_venta",
+                        "empresa_uuid": str(
+                            empresa_uuid
+                        ),
+                        "venta_id": str(
+                            venta_id
+                        ),
+                        "version": venta.version
+                    })       
+                
             elif item_type == "crear_movimiento_caja":
 
                 movimiento_id = UUID(payload["id"])
