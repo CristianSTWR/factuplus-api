@@ -559,6 +559,48 @@ class CajaConfig(Base):
         server_default=text("CURRENT_TIMESTAMP")
     )
     
+class SyncMovimientoStock(Base):
+    __tablename__ = "sync_movimientos_stock"
+
+    movimiento_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        index=True
+    )
+
+    operacion_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=False,
+        index=True
+    )
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        String(36),
+        nullable=False,
+        index=True
+    )
+
+    producto_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "productos.id",
+            ondelete="CASCADE"
+        ),
+        nullable=False,
+        index=True
+    )
+
+    cantidad: Mapped[Decimal] = mapped_column(
+        Numeric(12, 3),
+        nullable=False
+    )
+
+    procesado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now()
+    )
+    
 class CajaMovimiento(Base):
 
     __tablename__ = "caja_movimientos"

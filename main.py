@@ -75,7 +75,7 @@ import httpx
 import re
 # APLICACION
 from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, Producto, UnidadMedida, Rol, RolPermiso, UsuarioRol, MetodoPago, Cliente, Suplidor
-from models import Compra, CompraDetalle, VentaDetalle, Pago
+from models import Compra, CompraDetalle, VentaDetalle, Pago, SyncMovimientoStock
 
 # WEB
 from models import ListaEspera, EmpresaDispositivo
@@ -2030,8 +2030,9 @@ async def sync_batch(
                 "crear_cliente": 8,
                 "crear_producto": 9,
                 "crear_venta": 10,
-                "crear_movimiento_caja": 11,
-                "cerrar_caja": 12,
+                "movimiento_stock": 11,
+                "crear_movimiento_caja": 12,
+                "cerrar_caja": 13,
             }.get(x["type"], 999)
         )
                 
@@ -2759,7 +2760,91 @@ async def sync_batch(
                             venta_id
                         ),
                         "version": venta.version
-                    })       
+                    })    
+                    
+            elif item_type == "movimiento_stock":
+
+                movimiento_id = UUID(payload["id"])
+                operacion_id = UUID(payload["operacion_id"])
+                producto_id = UUID(payload["producto_id"])
+                empresa_uuid = UUID(payload["empresa_uuid"])
+
+                cantidad = Decimal(
+                    str(payload.get("cantidad", 0))
+                )
+
+                if cantidad == 0:
+                    raise ValueError(
+                        "El movimiento de stock no puede tener cantidad 0"
+                    )
+
+                movimiento_existente = await db.execute(
+                    select(SyncMovimientoStock).where(
+                        SyncMovimientoStock.movimiento_id == movimiento_id
+                    )
+                )
+
+                if movimiento_existente.scalar_one_or_none():
+                    print(
+                        "MOVIMIENTO STOCK YA PROCESADO:",
+                        movimiento_id
+                    )
+                    continue
+
+                resultado_producto = await db.execute(
+                    select(Producto)
+                    .where(
+                        Producto.id == producto_id,
+                        Producto.empresa_uuid == empresa_uuid
+                    )
+                    .with_for_update()
+                )
+
+                producto = resultado_producto.scalar_one_or_none()
+
+                if not producto:
+                    raise ValueError(
+                        f"No existe el producto {producto_id}"
+                    )
+
+                stock_actual = Decimal(
+                    str(producto.stock or 0)
+                )
+
+                nuevo_stock = stock_actual + cantidad
+
+                producto.stock = nuevo_stock
+
+                sync_movimiento = SyncMovimientoStock(
+                    movimiento_id=movimiento_id,
+                    operacion_id=operacion_id,
+                    empresa_uuid=empresa_uuid,
+                    producto_id=producto_id,
+                    cantidad=cantidad
+                )
+
+                db.add(sync_movimiento)
+
+                await db.flush()
+
+                eventos_ws.append({
+                    "tipo": "producto_actualizado",
+                    "accion": "stock_actualizado",
+                    "empresa_uuid": str(empresa_uuid),
+                    "producto_id": str(producto_id),
+                    "stock": float(nuevo_stock)
+                })
+
+                print(
+                    "STOCK SINCRONIZADO:",
+                    {
+                        "producto_id": str(producto_id),
+                        "cantidad": float(cantidad),
+                        "stock_antes": float(stock_actual),
+                        "stock_despues": float(nuevo_stock),
+                        "movimiento_id": str(movimiento_id)
+                    }
+                )   
                 
             elif item_type == "crear_movimiento_caja":
 
@@ -2823,6 +2908,8 @@ async def sync_batch(
                     db.add(movimiento)
 
                     db.add(movimiento)
+                    
+            
                     
             elif item_type == "resolver_movimiento_caja":
                 movimiento_id = UUID(payload["id"])
@@ -3729,7 +3816,6 @@ async def sync_batch(
                         producto.itbis = payload.get("itbis", 0)
                         producto.precio = payload.get("precio", 0)
                         producto.costo = payload.get("costo", 0)
-                        producto.stock = payload.get("stock", 0)
                         producto.stock_minimo = payload.get("stock_minimo", 0)
                         producto.activo = payload.get("activo", True)
                         producto.unidad_id = payload.get("unidad_id")
