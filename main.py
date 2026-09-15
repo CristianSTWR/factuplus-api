@@ -75,7 +75,7 @@ import httpx
 import re
 # APLICACION
 from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, Producto, UnidadMedida, Rol, RolPermiso, UsuarioRol, MetodoPago, Cliente, Suplidor
-from models import Compra, CompraDetalle, VentaDetalle, Pago, SyncMovimientoStock
+from models import Compra, CompraDetalle, VentaDetalle, Pago, HistorialStock
 
 # WEB
 from models import ListaEspera, EmpresaDispositivo
@@ -2795,8 +2795,8 @@ async def sync_batch(
                     )
 
                 movimiento_existente = await db.execute(
-                    select(SyncMovimientoStock).where(
-                        SyncMovimientoStock.movimiento_id == movimiento_id
+                    select(HistorialStock).where(
+                        HistorialStock.movimiento_id == movimiento_id
                     )
                 )
 
@@ -2815,15 +2815,30 @@ async def sync_batch(
 
                 producto.stock = nuevo_stock
 
-                sync_movimiento = SyncMovimientoStock(
+                tipo_movimiento = (
+                    "entrada"
+                    if cantidad > 0
+                    else "salida"
+                )
+
+                historial = HistorialStock(
                     movimiento_id=movimiento_id,
                     operacion_id=operacion_id,
                     empresa_uuid=empresa_uuid,
                     producto_id=producto_id,
-                    cantidad=cantidad
+                    tipo_movimiento=tipo_movimiento,
+                    cantidad=cantidad,
+                    stock_antes=stock_actual,
+                    stock_despues=nuevo_stock,
+                    referencia=payload.get("referencia"),
+                    usuario_id=(
+                        UUID(payload["usuario_id"])
+                        if payload.get("usuario_id")
+                        else None
+                    )
                 )
 
-                db.add(sync_movimiento)
+                db.add(historial)
 
                 await db.flush()
 
@@ -2890,8 +2905,7 @@ async def sync_batch(
                         "stock_despues": float(nuevo_stock),
                         "movimiento_id": str(movimiento_id)
                     }
-                ) 
-                
+                )  
             elif item_type == "crear_movimiento_caja":
 
                 movimiento_id = UUID(payload["id"])
@@ -4710,97 +4724,7 @@ async def caja_movimientos_changes(
         ],
         "has_more": len(movimientos) == limit
     }
-    
-@app.get("/sync/movimientos-stock/changes")
-async def movimientos_stock_changes(
-    empresa_uuid: str,
-    since: str | None = None,
-    limit: int = 5000,
-    offset: int = 0,
-    authorization: str = Header(None),
-    db: AsyncSession = Depends(get_db)
-):
 
-    token = authorization.replace(
-        "Bearer ",
-        ""
-    )
-
-    usuario_actual = await verificar_token(
-        token,
-        db
-    )
-
-    if usuario_actual.empresa_uuid != empresa_uuid:
-        raise HTTPException(
-            status_code=403,
-            detail="Acceso denegado"
-        )
-
-    query = select(
-        SyncMovimientoStock
-    ).where(
-        SyncMovimientoStock.empresa_uuid == empresa_uuid
-    )
-
-    if since:
-
-        since_dt = parser.isoparse(since)
-
-        if since_dt.tzinfo:
-            since_dt = since_dt.replace(
-                tzinfo=None
-            )
-
-        query = query.where(
-            SyncMovimientoStock.procesado_en > since_dt
-        )
-
-    query = query.order_by(
-        SyncMovimientoStock.procesado_en.asc()
-    )
-
-    query = query.limit(limit).offset(offset)
-
-    result = await db.execute(query)
-
-    movimientos = result.scalars().all()
-
-    return {
-        "items": [
-            {
-                "movimiento_id":
-                    str(m.movimiento_id),
-
-                "operacion_id":
-                    str(m.operacion_id),
-
-                "empresa_uuid":
-                    m.empresa_uuid,
-
-                "producto_id":
-                    str(m.producto_id),
-
-                "cantidad":
-                    float(m.cantidad or 0),
-
-                "procesado_en":
-                    m.procesado_en.isoformat()
-                    if m.procesado_en
-                    else None
-            }
-            for m in movimientos
-        ],
-
-        "has_more":
-            len(movimientos) == limit,
-
-        "last_sync":
-            movimientos[-1].procesado_en.isoformat()
-            if movimientos
-            else since
-    }
-        
 @app.get("/sync/productos/changes")
 async def productos_changes(
     empresa_uuid: str,

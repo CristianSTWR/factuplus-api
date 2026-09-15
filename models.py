@@ -559,12 +559,19 @@ class CajaConfig(Base):
         server_default=text("CURRENT_TIMESTAMP")
     )
     
-class SyncMovimientoStock(Base):
-    __tablename__ = "sync_movimientos_stock"
+class HistorialStock(Base):
+    __tablename__ = "historial_stock"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True
+    )
 
     movimiento_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
-        primary_key=True,
+        unique=True,
+        nullable=False,
         index=True
     )
 
@@ -590,9 +597,39 @@ class SyncMovimientoStock(Base):
         index=True
     )
 
+    tipo_movimiento: Mapped[str] = mapped_column(
+        String,
+        nullable=False
+    )
+
     cantidad: Mapped[Decimal] = mapped_column(
         Numeric(12, 3),
         nullable=False
+    )
+
+    stock_antes: Mapped[Decimal] = mapped_column(
+        Numeric(12, 3),
+        nullable=False
+    )
+
+    stock_despues: Mapped[Decimal] = mapped_column(
+        Numeric(12, 3),
+        nullable=False
+    )
+
+    referencia: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    usuario_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "usuarios.id",
+            ondelete="SET NULL"
+        ),
+        nullable=True,
+        index=True
     )
 
     procesado_en: Mapped[datetime] = mapped_column(
@@ -600,7 +637,13 @@ class SyncMovimientoStock(Base):
         nullable=False,
         server_default=func.now()
     )
-    
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now()
+    )
+     
 class CajaMovimiento(Base):
 
     __tablename__ = "caja_movimientos"
