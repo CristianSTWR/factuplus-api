@@ -2830,9 +2830,55 @@ async def sync_batch(
                 eventos_ws.append({
                     "tipo": "producto_actualizado",
                     "accion": "stock_actualizado",
-                    "empresa_uuid": empresa_uuid,
-                    "producto_id": str(producto_id),
-                    "stock": float(nuevo_stock)
+
+                    "empresa_uuid": str(producto.empresa_uuid),
+                    "producto_id": str(producto.id),
+
+                    "codigo_barras": producto.codigo_barras,
+                    "codigo_balanza": producto.codigo_balanza,
+                    "codigo_interno": producto.codigo_interno,
+
+                    "es_balanza": producto.es_balanza,
+
+                    "nombre": producto.nombre,
+
+                    "precio": float(producto.precio or 0),
+                    "costo": float(producto.costo or 0),
+
+                    "stock": float(nuevo_stock),
+                    "stock_minimo": float(producto.stock_minimo or 0),
+
+                    "itbis": float(producto.itbis or 0),
+
+                    "unidad_id": (
+                        str(producto.unidad_id)
+                        if producto.unidad_id
+                        else None
+                    ),
+
+                    "activo": producto.activo,
+
+                    "sync_status": producto.sync_status,
+
+                    "deleted_at": (
+                        producto.deleted_at.isoformat()
+                        if producto.deleted_at
+                        else None
+                    ),
+
+                    "version": producto.version,
+
+                    "updated_at": (
+                        producto.updated_at.isoformat()
+                        if producto.updated_at
+                        else None
+                    ),
+
+                    "created_at": (
+                        producto.created_at.isoformat()
+                        if producto.created_at
+                        else None
+                    )
                 })
 
                 print(
