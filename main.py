@@ -2830,9 +2830,25 @@ async def sync_batch(
                 eventos_ws.append({
                     "tipo": "producto_actualizado",
                     "accion": "stock_actualizado",
-                    "empresa_uuid": empresa_uuid,
-                    "producto_id": str(producto_id),
-                    "stock": float(nuevo_stock)
+                    "empresa_uuid": producto.empresa_uuid,
+                    "producto_id": producto.id,
+                    "codigo_barras": producto.codigo_barras,
+                    "codigo_balanza": producto.codigo_balanza,
+                    "codigo_interno": producto.codigo_interno,
+                    "es_balanza": producto.es_balanza,
+                    "nombre": producto.nombre,
+                    "precio": producto.precio,
+                    "costo": producto.costo,
+                    "stock": float(producto.stock),
+                    "stock_minimo": producto.stock_minimo,
+                    "itbis": producto.itbis,
+                    "unidad_id": producto.unidad_id,
+                    "activo": producto.activo,
+                    "sync_status": producto.sync_status,
+                    "deleted_at": producto.deleted_at,
+                    "version": producto.version,
+                    "updated_at": producto.updated_at,
+                    "created_at": producto.created_at
                 })
 
                 print(
@@ -2845,6 +2861,7 @@ async def sync_batch(
                         "movimiento_id": str(movimiento_id)
                     }
                 ) 
+                
             elif item_type == "crear_movimiento_caja":
 
                 movimiento_id = UUID(payload["id"])
@@ -3816,6 +3833,7 @@ async def sync_batch(
                         producto.precio = payload.get("precio", 0)
                         producto.costo = payload.get("costo", 0)
                         producto.stock_minimo = payload.get("stock_minimo", 0)
+                        producto.stock = payload.get("stock", 0)
                         producto.activo = payload.get("activo", True)
                         producto.unidad_id = payload.get("unidad_id")
 
