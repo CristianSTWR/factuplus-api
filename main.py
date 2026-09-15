@@ -2767,7 +2767,7 @@ async def sync_batch(
                 movimiento_id = UUID(payload["id"])
                 operacion_id = UUID(payload["operacion_id"])
                 producto_id = UUID(payload["producto_id"])
-                empresa_uuid = UUID(payload["empresa_uuid"])
+                empresa_uuid = str(payload["empresa_uuid"])
 
                 cantidad = Decimal(
                     str(payload.get("cantidad", 0))
@@ -2777,19 +2777,6 @@ async def sync_batch(
                     raise ValueError(
                         "El movimiento de stock no puede tener cantidad 0"
                     )
-
-                movimiento_existente = await db.execute(
-                    select(SyncMovimientoStock).where(
-                        SyncMovimientoStock.movimiento_id == movimiento_id
-                    )
-                )
-
-                if movimiento_existente.scalar_one_or_none():
-                    print(
-                        "MOVIMIENTO STOCK YA PROCESADO:",
-                        movimiento_id
-                    )
-                    continue
 
                 resultado_producto = await db.execute(
                     select(Producto)
@@ -2806,6 +2793,19 @@ async def sync_batch(
                     raise ValueError(
                         f"No existe el producto {producto_id}"
                     )
+
+                movimiento_existente = await db.execute(
+                    select(SyncMovimientoStock).where(
+                        SyncMovimientoStock.movimiento_id == movimiento_id
+                    )
+                )
+
+                if movimiento_existente.scalar_one_or_none():
+                    print(
+                        "MOVIMIENTO STOCK YA PROCESADO:",
+                        movimiento_id
+                    )
+                    continue
 
                 stock_actual = Decimal(
                     str(producto.stock or 0)
@@ -2830,7 +2830,7 @@ async def sync_batch(
                 eventos_ws.append({
                     "tipo": "producto_actualizado",
                     "accion": "stock_actualizado",
-                    "empresa_uuid": str(empresa_uuid),
+                    "empresa_uuid": empresa_uuid,
                     "producto_id": str(producto_id),
                     "stock": float(nuevo_stock)
                 })
@@ -2844,8 +2844,7 @@ async def sync_batch(
                         "stock_despues": float(nuevo_stock),
                         "movimiento_id": str(movimiento_id)
                     }
-                )   
-                
+                ) 
             elif item_type == "crear_movimiento_caja":
 
                 movimiento_id = UUID(payload["id"])
