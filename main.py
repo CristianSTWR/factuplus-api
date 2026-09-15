@@ -3833,7 +3833,7 @@ async def sync_batch(
                         producto.precio = payload.get("precio", 0)
                         producto.costo = payload.get("costo", 0)
                         producto.stock_minimo = payload.get("stock_minimo", 0)
-                        producto.stock = payload.get("stock", 0)
+                 
                         producto.activo = payload.get("activo", True)
                         producto.unidad_id = payload.get("unidad_id")
 
