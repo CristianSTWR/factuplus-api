@@ -4720,6 +4720,7 @@ async def movimientos_stock_changes(
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
+
     token = authorization.replace(
         "Bearer ",
         ""
@@ -4736,7 +4737,9 @@ async def movimientos_stock_changes(
             detail="Acceso denegado"
         )
 
-    query = select(SyncMovimientoStock).where(
+    query = select(
+        SyncMovimientoStock
+    ).where(
         SyncMovimientoStock.empresa_uuid == empresa_uuid
     )
 
@@ -4766,23 +4769,20 @@ async def movimientos_stock_changes(
     return {
         "items": [
             {
-                "movimiento_id": str(
-                    m.movimiento_id
-                ),
+                "movimiento_id":
+                    str(m.movimiento_id),
 
-                "operacion_id": str(
-                    m.operacion_id
-                ),
+                "operacion_id":
+                    str(m.operacion_id),
 
-                "empresa_uuid": m.empresa_uuid,
+                "empresa_uuid":
+                    m.empresa_uuid,
 
-                "producto_id": str(
-                    m.producto_id
-                ),
+                "producto_id":
+                    str(m.producto_id),
 
-                "cantidad": float(
-                    m.cantidad or 0
-                ),
+                "cantidad":
+                    float(m.cantidad or 0),
 
                 "procesado_en":
                     m.procesado_en.isoformat()
@@ -4793,8 +4793,14 @@ async def movimientos_stock_changes(
         ],
 
         "has_more":
-            len(movimientos) == limit
+            len(movimientos) == limit,
+
+        "last_sync":
+            movimientos[-1].procesado_en.isoformat()
+            if movimientos
+            else since
     }
+        
 @app.get("/sync/productos/changes")
 async def productos_changes(
     empresa_uuid: str,
