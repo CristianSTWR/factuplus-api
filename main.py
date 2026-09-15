@@ -4712,104 +4712,89 @@ async def caja_movimientos_changes(
     }
     
 @app.get("/sync/movimientos-stock/changes")
-async def obtener_movimientos_stock_changes(
+async def movimientos_stock_changes(
     empresa_uuid: str,
-    last_sync: Optional[datetime] = Query(None),
-    last_id: Optional[UUID] = Query(None),
-    limit: int = Query(500, ge=1, le=1000),
-    db: AsyncSession = Depends(get_db),
+    since: str | None = None,
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
 ):
-    params = {
-        "empresa_uuid": empresa_uuid,
-        "limit": limit,
-    }
-
-    query = """
-        SELECT
-            sm.movimiento_id,
-            sm.operacion_id,
-            sm.empresa_uuid,
-            sm.producto_id,
-            sm.cantidad,
-            sm.procesado_en
-        FROM sync_movimientos_stock sm
-        WHERE sm.empresa_uuid = :empresa_uuid
-    """
-
-    if last_sync:
-        params["last_sync"] = last_sync
-
-        if last_id:
-            params["last_id"] = last_id
-
-            query += """
-                AND (
-                    sm.procesado_en > :last_sync
-                    OR (
-                        sm.procesado_en = :last_sync
-                        AND sm.movimiento_id > :last_id
-                    )
-                )
-            """
-        else:
-            query += """
-                AND sm.procesado_en > :last_sync
-            """
-
-    query += """
-        ORDER BY
-            sm.procesado_en ASC,
-            sm.movimiento_id ASC
-        LIMIT :limit
-    """
-
-    result = await db.execute(
-        text(query),
-        params
+    token = authorization.replace(
+        "Bearer ",
+        ""
     )
 
-    movimientos = result.mappings().all()
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
 
-    ultimo = movimientos[-1] if movimientos else None
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(SyncMovimientoStock).where(
+        SyncMovimientoStock.empresa_uuid == empresa_uuid
+    )
+
+    if since:
+
+        since_dt = parser.isoparse(since)
+
+        if since_dt.tzinfo:
+            since_dt = since_dt.replace(
+                tzinfo=None
+            )
+
+        query = query.where(
+            SyncMovimientoStock.procesado_en > since_dt
+        )
+
+    query = query.order_by(
+        SyncMovimientoStock.procesado_en.asc()
+    )
+
+    query = query.limit(limit).offset(offset)
+
+    result = await db.execute(query)
+
+    movimientos = result.scalars().all()
 
     return {
-        "movimientos": [
+        "items": [
             {
-                "movimiento_id": str(m["movimiento_id"]),
-                "operacion_id": str(m["operacion_id"]),
-                "empresa_uuid": m["empresa_uuid"],
-                "producto_id": str(m["producto_id"]),
-                "cantidad": float(m["cantidad"]),
-                "procesado_en": (
-                    m["procesado_en"].isoformat()
-                    if m["procesado_en"]
-                    else None
+                "movimiento_id": str(
+                    m.movimiento_id
                 ),
+
+                "operacion_id": str(
+                    m.operacion_id
+                ),
+
+                "empresa_uuid": m.empresa_uuid,
+
+                "producto_id": str(
+                    m.producto_id
+                ),
+
+                "cantidad": float(
+                    m.cantidad or 0
+                ),
+
+                "procesado_en":
+                    m.procesado_en.isoformat()
+                    if m.procesado_en
+                    else None
             }
             for m in movimientos
         ],
-        "count": len(movimientos),
-        "has_more": len(movimientos) == limit,
-        "last_sync": (
-            ultimo["procesado_en"].isoformat()
-            if ultimo
-            else (
-                last_sync.isoformat()
-                if last_sync
-                else None
-            )
-        ),
-        "last_id": (
-            str(ultimo["movimiento_id"])
-            if ultimo
-            else (
-                str(last_id)
-                if last_id
-                else None
-            )
-        ),
+
+        "has_more":
+            len(movimientos) == limit
     }
-    
 @app.get("/sync/productos/changes")
 async def productos_changes(
     empresa_uuid: str,
