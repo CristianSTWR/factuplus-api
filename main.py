@@ -4848,6 +4848,120 @@ async def productos_changes(
         "has_more": len(productos) == limit
     }
 
+@app.get("/sync/historial-stock/changes")
+async def historial_stock_changes(
+    empresa_uuid: str,
+    since: str | None = None,
+    movimiento_id: str | None = None,
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(HistorialStock).where(
+        HistorialStock.empresa_uuid == empresa_uuid
+    )
+
+    if movimiento_id:
+
+        query = query.where(
+            HistorialStock.movimiento_id ==
+            movimiento_id
+        )
+
+    elif since:
+
+        since_dt = parser.isoparse(since)
+
+        if since_dt.tzinfo:
+            since_dt = since_dt.replace(
+                tzinfo=None
+            )
+
+        query = query.where(
+            HistorialStock.procesado_en >
+            since_dt
+        )
+
+    query = query.order_by(
+        HistorialStock.procesado_en.asc()
+    )
+
+    query = query.limit(limit).offset(offset)
+
+    result = await db.execute(query)
+
+    movimientos = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "movimiento_id":
+                    str(m.movimiento_id),
+
+                "operacion_id":
+                    str(m.operacion_id),
+
+                "empresa_uuid":
+                    m.empresa_uuid,
+
+                "producto_id":
+                    str(m.producto_id),
+
+                "tipo_movimiento":
+                    m.tipo_movimiento,
+
+                "cantidad":
+                    float(m.cantidad or 0),
+
+                "stock_antes":
+                    float(m.stock_antes or 0),
+
+                "stock_despues":
+                    float(m.stock_despues or 0),
+
+                "referencia":
+                    m.referencia,
+
+                "usuario_id":
+                    str(m.usuario_id)
+                    if m.usuario_id
+                    else None,
+
+                "procesado_en":
+                    m.procesado_en.isoformat()
+                    if m.procesado_en
+                    else None,
+
+                "created_at":
+                    m.created_at.isoformat()
+                    if m.created_at
+                    else None
+            }
+            for m in movimientos
+        ],
+
+        "has_more":
+            len(movimientos) == limit
+    }
+
 @app.get("/sync/ventas/changes")
 async def ventas_changes(
     empresa_uuid: str,
@@ -8977,6 +9091,99 @@ async def restore_productos_changes(
             for p in productos
         ],
         "has_more": len(productos) == limit
+    }
+
+@app.get("/restore/historial-stock/changes")
+async def restore_historial_stock_changes(
+    empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(HistorialStock)
+        .where(
+            HistorialStock.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            HistorialStock.procesado_en.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    movimientos = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "movimiento_id":
+                    str(m.movimiento_id),
+
+                "operacion_id":
+                    str(m.operacion_id),
+
+                "empresa_uuid":
+                    m.empresa_uuid,
+
+                "producto_id":
+                    str(m.producto_id),
+
+                "tipo_movimiento":
+                    m.tipo_movimiento,
+
+                "cantidad":
+                    float(m.cantidad or 0),
+
+                "stock_antes":
+                    float(m.stock_antes or 0),
+
+                "stock_despues":
+                    float(m.stock_despues or 0),
+
+                "referencia":
+                    m.referencia,
+
+                "usuario_id":
+                    str(m.usuario_id)
+                    if m.usuario_id
+                    else None,
+
+                "procesado_en":
+                    m.procesado_en.isoformat()
+                    if m.procesado_en
+                    else None,
+
+                "created_at":
+                    m.created_at.isoformat()
+                    if m.created_at
+                    else None
+            }
+            for m in movimientos
+        ],
+
+        "has_more":
+            len(movimientos) == limit
     }
 
 @app.get("/restore/pagos/changes")
