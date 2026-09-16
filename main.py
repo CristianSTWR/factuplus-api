@@ -4907,12 +4907,22 @@ async def historial_stock_changes(
 
     elif since:
 
-        since_dt = parser.isoparse(since)
+        try:
 
-        if since_dt.tzinfo:
-            since_dt = since_dt.replace(
-                tzinfo=None
+            since_dt = parser.isoparse(
+                since
             )
+
+        except Exception:
+
+            raise HTTPException(
+                status_code=400,
+                detail="Parámetro since inválido"
+            )
+
+        since_dt = since_dt - timedelta(
+            minutes=5
+        )
 
         query = query.where(
             HistorialStock.procesado_en >
@@ -4920,12 +4930,19 @@ async def historial_stock_changes(
         )
 
     query = query.order_by(
-        HistorialStock.procesado_en.asc()
+        HistorialStock.procesado_en.asc(),
+        HistorialStock.movimiento_id.asc()
     )
 
-    query = query.limit(limit).offset(offset)
+    query = query.limit(
+        limit
+    ).offset(
+        offset
+    )
 
-    result = await db.execute(query)
+    result = await db.execute(
+        query
+    )
 
     movimientos = result.scalars().all()
 
@@ -4980,7 +4997,6 @@ async def historial_stock_changes(
         "has_more":
             len(movimientos) == limit
     }
-
 @app.get("/sync/ventas/changes")
 async def ventas_changes(
     empresa_uuid: str,
