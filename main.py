@@ -2514,10 +2514,32 @@ async def sync_batch(
 
                 if not exists:
 
+                    resultado_cursor = await db.execute(
+                        text("""
+                            INSERT INTO empresa_sync_counters (
+                                empresa_uuid,
+                                ventas_cursor
+                            )
+                            VALUES (:empresa_uuid, 1)
+                            ON CONFLICT (empresa_uuid)
+                            DO UPDATE SET
+                                ventas_cursor =
+                                    empresa_sync_counters.ventas_cursor + 1
+                            RETURNING ventas_cursor
+                        """),
+                        {
+                            "empresa_uuid": empresa_uuid
+                        }
+                    )
+
+                    sync_cursor = resultado_cursor.scalar_one()
+
                     venta = Venta(
                         id=venta_id,
 
                         empresa_uuid=empresa_uuid,
+
+                        sync_cursor=sync_cursor,
 
                         cliente_id=UUID(
                             payload["cliente_id"]
@@ -2592,176 +2614,7 @@ async def sync_batch(
                     )
 
                     db.add(venta)
-
-                    await db.flush()
-
-                    for detalle_payload in payload.get(
-                        "detalles",
-                        []
-                    ):
-
-                        detalle_id = UUID(
-                            detalle_payload["id"]
-                        )
-
-                        q_detalle = await db.execute(
-                            select(VentaDetalle).where(
-                                VentaDetalle.id == detalle_id,
-                                VentaDetalle.empresa_uuid == empresa_uuid
-                            )
-                        )
-
-                        detalle_exists = (
-                            q_detalle.scalar_one_or_none()
-                        )
-
-                        if not detalle_exists:
-
-                            detalle = VentaDetalle(
-                                id=detalle_id,
-
-                                empresa_uuid=empresa_uuid,
-
-                                venta_id=venta_id,
-
-                                producto_id=UUID(
-                                    detalle_payload[
-                                        "producto_id"
-                                    ]
-                                ),
-
-                                cantidad=Decimal(
-                                    str(
-                                        detalle_payload.get(
-                                            "cantidad",
-                                            0
-                                        )
-                                    )
-                                ),
-
-                                precio_unitario=Decimal(
-                                    str(
-                                        detalle_payload.get(
-                                            "precio_unitario",
-                                            0
-                                        )
-                                    )
-                                ),
-
-                                subtotal=Decimal(
-                                    str(
-                                        detalle_payload.get(
-                                            "subtotal",
-                                            0
-                                        )
-                                    )
-                                ),
-
-                                sync_status=detalle_payload.get(
-                                    "sync_status",
-                                    "synced"
-                                ),
-
-                                version=detalle_payload.get(
-                                    "version",
-                                    1
-                                ),
-
-                                deleted_at=(
-                                    parse_datetime(
-                                        detalle_payload.get(
-                                            "deleted_at"
-                                        )
-                                    )
-                                    if detalle_payload.get(
-                                        "deleted_at"
-                                    )
-                                    else None
-                                )
-                            )
-
-                            db.add(detalle)
-
-                    for pago_payload in payload.get(
-                        "pagos",
-                        []
-                    ):
-
-                        pago_id = UUID(
-                            pago_payload["id"]
-                        )
-
-                        q_pago = await db.execute(
-                            select(Pago).where(
-                                Pago.id == pago_id,
-                                Pago.empresa_uuid == empresa_uuid
-                            )
-                        )
-
-                        pago_exists = (
-                            q_pago.scalar_one_or_none()
-                        )
-
-                        if not pago_exists:
-
-                            pago = Pago(
-                                id=pago_id,
-
-                                empresa_uuid=empresa_uuid,
-
-                                cliente_id=UUID(
-                                    pago_payload[
-                                        "cliente_id"
-                                    ]
-                                )
-                                if pago_payload.get(
-                                    "cliente_id"
-                                )
-                                else None,
-
-                                venta_id=venta_id,
-
-                                metodo_pago_id=UUID(
-                                    pago_payload[
-                                        "metodo_pago_id"
-                                    ]
-                                ),
-
-                                monto=Decimal(
-                                    str(
-                                        pago_payload.get(
-                                            "monto",
-                                            0
-                                        )
-                                    )
-                                ),
-
-                                observacion=pago_payload.get(
-                                    "observacion"
-                                ),
-
-                                estado=pago_payload.get(
-                                    "estado",
-                                    "aprobado"
-                                )
-                            )
-
-                            db.add(pago)
-
-                    await db.flush()
-
-                    eventos_ws.append({
-                        "tipo": "venta_actualizada",
-                        "accion": "crear_venta",
-                        "empresa_uuid": str(
-                            empresa_uuid
-                        ),
-                        "venta_id": str(
-                            venta_id
-                        ),
-                        "version": venta.version
-                    })    
-                    
+                        
             elif item_type == "movimiento_stock":
 
                 movimiento_id = UUID(payload["id"])
@@ -9475,7 +9328,7 @@ async def restore_ventas_changes(
             Venta.empresa_uuid == empresa_uuid
         )
         .order_by(
-            Venta.updated_at.desc()
+            Venta.sync_cursor.desc()
         )
         .limit(limit)
         .offset(offset)
@@ -9516,6 +9369,9 @@ async def restore_ventas_changes(
                 "version":
                     v.version,
 
+                "sync_cursor":
+                    v.sync_cursor,
+
                 "observacion":
                     v.observacion,
 
@@ -9555,9 +9411,9 @@ async def restore_ventas_changes(
             }
             for v in ventas
         ],
-        "has_more": len(ventas) == limit
+        "has_more":
+            len(ventas) == limit
     }
-
 @app.get("/restore/unidades_medida/changes")
 async def restore_unidades_medida_changes(
     empresa_uuid: str,

@@ -874,6 +874,12 @@ class Venta(Base):
         server_default=text("CURRENT_TIMESTAMP")
     )
     
+    sync_cursor: Mapped[int] = mapped_column(
+            BigInteger,
+            unique=True,
+            nullable=False
+        )
+    
 class VentaDetalle(Base):
 
     __tablename__ = "venta_detalle"
