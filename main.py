@@ -5013,24 +5013,39 @@ async def ventas_changes(
 
     if since:
 
-        since_dt = parser.isoparse(since)
+        try:
 
-        if since_dt.tzinfo:
-            since_dt = since_dt.replace(
-                tzinfo=None
+            since_dt = parser.isoparse(since)
+
+        except Exception:
+
+            raise HTTPException(
+                status_code=400,
+                detail="Parámetro since inválido"
             )
+
+        since_dt = since_dt - timedelta(
+            minutes=5
+        )
 
         query = query.where(
             Venta.updated_at > since_dt
         )
 
     query = query.order_by(
-        Venta.updated_at.asc()
+        Venta.updated_at.asc(),
+        Venta.id.asc()
     )
 
-    query = query.limit(limit).offset(offset)
+    query = query.limit(
+        limit
+    ).offset(
+        offset
+    )
 
-    result = await db.execute(query)
+    result = await db.execute(
+        query
+    )
 
     ventas = result.scalars().all()
 
@@ -5038,7 +5053,9 @@ async def ventas_changes(
         "items": [
             {
                 "id": str(v.id),
-                "empresa_uuid": v.empresa_uuid,
+
+                "empresa_uuid":
+                    v.empresa_uuid,
 
                 "cliente_id":
                     str(v.cliente_id)
@@ -5102,9 +5119,11 @@ async def ventas_changes(
             }
             for v in ventas
         ],
-        "has_more": len(ventas) == limit
-    }
 
+        "has_more":
+            len(ventas) == limit
+    }
+    
 @app.get("/sync/pagos/changes")
 async def pagos_changes(
     empresa_uuid: str,
