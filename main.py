@@ -2846,8 +2846,27 @@ async def sync_batch(
                     "tipo": "producto_actualizado",
                     "accion": "stock_actualizado",
 
+                    "movimiento_id": str(movimiento_id),
+                    "operacion_id": str(operacion_id),
+
                     "empresa_uuid": str(producto.empresa_uuid),
                     "producto_id": str(producto.id),
+
+                    "cantidad": float(cantidad),
+                    "tipo_movimiento": tipo_movimiento,
+
+                    "stock_antes": float(stock_actual),
+                    "stock_despues": float(nuevo_stock),
+
+                    "referencia": payload.get("referencia"),
+
+                    "usuario_id": (
+                        str(
+                            UUID(payload["usuario_id"])
+                        )
+                        if payload.get("usuario_id")
+                        else None
+                    ),
 
                     "codigo_barras": producto.codigo_barras,
                     "codigo_balanza": producto.codigo_balanza,
@@ -2905,7 +2924,7 @@ async def sync_batch(
                         "stock_despues": float(nuevo_stock),
                         "movimiento_id": str(movimiento_id)
                     }
-                )  
+                ) 
             elif item_type == "crear_movimiento_caja":
 
                 movimiento_id = UUID(payload["id"])
