@@ -4850,16 +4850,15 @@ async def historial_stock_changes(
         "has_more":
             len(movimientos) == limit
     }
+
 @app.get("/sync/ventas/changes")
 async def ventas_changes(
     empresa_uuid: str,
-    since: str | None = None,
+    cursor: int | None = None,
     limit: int = 5000,
-    offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
-
     token = authorization.replace(
         "Bearer ",
         ""
@@ -4880,36 +4879,17 @@ async def ventas_changes(
         Venta.empresa_uuid == empresa_uuid
     )
 
-    if since:
-
-        try:
-
-            since_dt = parser.isoparse(since)
-
-        except Exception:
-
-            raise HTTPException(
-                status_code=400,
-                detail="Parámetro since inválido"
-            )
-
-        since_dt = since_dt - timedelta(
-            minutes=5
-        )
-
+    if cursor is not None:
         query = query.where(
-            Venta.updated_at > since_dt
+            Venta.sync_cursor > cursor
         )
 
     query = query.order_by(
-        Venta.updated_at.asc(),
-        Venta.id.asc()
+        Venta.sync_cursor.asc()
     )
 
     query = query.limit(
         limit
-    ).offset(
-        offset
     )
 
     result = await db.execute(
@@ -4917,6 +4897,25 @@ async def ventas_changes(
     )
 
     ventas = result.scalars().all()
+
+    print(
+        "SYNC VENTAS:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(ventas),
+            "primer_cursor": (
+                ventas[0].sync_cursor
+                if ventas
+                else None
+            ),
+            "ultimo_cursor": (
+                ventas[-1].sync_cursor
+                if ventas
+                else None
+            )
+        }
+    )
 
     return {
         "items": [
@@ -4948,6 +4947,9 @@ async def ventas_changes(
 
                 "version":
                     v.version,
+
+                "sync_cursor":
+                    v.sync_cursor,
 
                 "observacion":
                     v.observacion,
@@ -9414,6 +9416,7 @@ async def restore_ventas_changes(
         "has_more":
             len(ventas) == limit
     }
+    
 @app.get("/restore/unidades_medida/changes")
 async def restore_unidades_medida_changes(
     empresa_uuid: str,
