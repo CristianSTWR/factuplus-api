@@ -9133,103 +9133,53 @@ async def restore_productos_changes(
 
     productos = result.scalars().all()
 
-    print(
-        "RESTORE PRODUCTOS:",
-        {
-            "empresa_uuid": empresa_uuid,
-            "cursor_recibido": cursor,
-            "cantidad": len(productos),
-            "primer_cursor": (
-                productos[0].sync_cursor
-                if productos
-                else None
-            ),
-            "ultimo_cursor": (
-                productos[-1].sync_cursor
-                if productos
-                else None
-            )
-        }
-    )
-
     return {
         "items": [
             {
-                "id":
-                    str(p.id),
-
-                "empresa_uuid":
-                    p.empresa_uuid,
-
-                "codigo_barras":
-                    p.codigo_barras,
-
-                "codigo_balanza":
-                    p.codigo_balanza,
-
-                "codigo_interno":
-                    p.codigo_interno,
-
-                "es_balanza":
-                    p.es_balanza,
-
-                "nombre":
-                    p.nombre,
-
-                "precio":
-                    float(p.precio or 0),
-
-                "costo":
-                    float(p.costo or 0),
-
-                "stock":
-                    float(p.stock or 0),
-
-                "stock_minimo":
-                    float(p.stock_minimo or 0),
-
-                "itbis":
-                    float(p.itbis or 0),
-
-                "unidad_id":
-                    str(p.unidad_id)
+                "id": str(p.id),
+                "empresa_uuid": p.empresa_uuid,
+                "codigo_barras": p.codigo_barras,
+                "codigo_balanza": p.codigo_balanza,
+                "codigo_interno": p.codigo_interno,
+                "es_balanza": p.es_balanza,
+                "nombre": p.nombre,
+                "precio": float(p.precio or 0),
+                "costo": float(p.costo or 0),
+                "stock": float(p.stock or 0),
+                "stock_minimo": float(p.stock_minimo or 0),
+                "itbis": float(p.itbis or 0),
+                "unidad_id": str(p.unidad_id)
                     if p.unidad_id
                     else None,
-
-                "activo":
-                    p.activo,
-
-                "sync_status":
-                    p.sync_status,
-
-                "version":
-                    p.version,
-
-                "sync_cursor":
-                    p.sync_cursor,
-
-                "updated_at":
+                "activo": p.activo,
+                "sync_status": p.sync_status,
+                "version": p.version,
+                "sync_cursor": (
+                    int(p.sync_cursor)
+                    if p.sync_cursor is not None
+                    else None
+                ),
+                "updated_at": (
                     p.updated_at.isoformat()
                     if p.updated_at
-                    else None,
-
-                "created_at":
+                    else None
+                ),
+                "created_at": (
                     p.created_at.isoformat()
                     if p.created_at
-                    else None,
-
-                "deleted_at":
+                    else None
+                ),
+                "deleted_at": (
                     p.deleted_at.isoformat()
                     if p.deleted_at
                     else None
+                )
             }
             for p in productos
         ],
-
-        "has_more":
-            len(productos) == limit
+        "has_more": len(productos) == limit
     }
-
+    
 @app.get("/restore/historial-stock/changes")
 async def restore_historial_stock_changes(
     empresa_uuid: str,
