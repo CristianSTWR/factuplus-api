@@ -4906,8 +4906,6 @@ async def ventas_changes(
     empresa_uuid: str,
     cursor: int | None = None,
     limit: int = 5000,
-    venta_id: UUID | None = None,
-    version: int | None = None,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
@@ -4931,17 +4929,7 @@ async def ventas_changes(
         Venta.empresa_uuid == empresa_uuid
     )
 
-    if venta_id is not None:
-        query = query.where(
-            Venta.id == venta_id
-        )
-
-        if version is not None:
-            query = query.where(
-                Venta.version >= version
-            )
-
-    elif cursor is not None:
+    if cursor is not None:
         query = query.where(
             Venta.sync_cursor > cursor
         )
@@ -4965,12 +4953,6 @@ async def ventas_changes(
         {
             "empresa_uuid": empresa_uuid,
             "cursor_recibido": cursor,
-            "venta_id_recibido": (
-                str(venta_id)
-                if venta_id
-                else None
-            ),
-            "version_recibida": version,
             "cantidad": len(ventas),
             "primer_cursor": (
                 ventas[0].sync_cursor
@@ -4979,16 +4961,6 @@ async def ventas_changes(
             ),
             "ultimo_cursor": (
                 ventas[-1].sync_cursor
-                if ventas
-                else None
-            ),
-            "primer_version": (
-                ventas[0].version
-                if ventas
-                else None
-            ),
-            "ultimo_version": (
-                ventas[-1].version
                 if ventas
                 else None
             )
@@ -5073,7 +5045,6 @@ async def ventas_changes(
             len(ventas) == limit
     }
     
-       
 @app.get("/sync/pagos/changes")
 async def pagos_changes(
     empresa_uuid: str,
