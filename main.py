@@ -2660,6 +2660,29 @@ async def sync_batch(
                     )
                     continue
 
+                resultado_cursor = await db.execute(
+                    text("""
+                        INSERT INTO empresa_sync_counters (
+                            empresa_uuid,
+                            historial_stock_cursor
+                        )
+                        VALUES (
+                            :empresa_uuid,
+                            1
+                        )
+                        ON CONFLICT (empresa_uuid)
+                        DO UPDATE SET
+                            historial_stock_cursor =
+                                empresa_sync_counters.historial_stock_cursor + 1
+                        RETURNING historial_stock_cursor
+                    """),
+                    {
+                        "empresa_uuid": empresa_uuid
+                    }
+                )
+
+                sync_cursor = resultado_cursor.scalar_one()
+
                 stock_actual = Decimal(
                     str(producto.stock or 0)
                 )
@@ -2688,7 +2711,8 @@ async def sync_batch(
                         UUID(payload["usuario_id"])
                         if payload.get("usuario_id")
                         else None
-                    )
+                    ),
+                    sync_cursor=sync_cursor
                 )
 
                 db.add(historial)
@@ -2765,7 +2789,9 @@ async def sync_batch(
                         producto.created_at.isoformat()
                         if producto.created_at
                         else None
-                    )
+                    ),
+
+                    "sync_cursor": sync_cursor
                 })
 
                 print(
@@ -2775,9 +2801,11 @@ async def sync_batch(
                         "cantidad": float(cantidad),
                         "stock_antes": float(stock_actual),
                         "stock_despues": float(nuevo_stock),
-                        "movimiento_id": str(movimiento_id)
+                        "movimiento_id": str(movimiento_id),
+                        "sync_cursor": sync_cursor
                     }
-                ) 
+                )
+      
             elif item_type == "crear_movimiento_caja":
 
                 movimiento_id = UUID(payload["id"])

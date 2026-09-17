@@ -643,6 +643,12 @@ class HistorialStock(Base):
         nullable=False,
         server_default=func.now()
     )
+    
+    sync_cursor: Mapped[int] = mapped_column(
+                BigInteger,
+                unique=True,
+                nullable=False
+            )
      
 class CajaMovimiento(Base):
 
