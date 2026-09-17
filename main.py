@@ -2494,9 +2494,13 @@ async def sync_batch(
                         
             elif item_type == "crear_venta":
 
-                venta_id = UUID(payload["id"])
+                venta_id = UUID(
+                    payload["id"]
+                )
 
-                empresa_uuid = payload.get("empresa_uuid")
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
 
                 if not empresa_uuid:
                     raise ValueError(
@@ -2514,25 +2518,12 @@ async def sync_batch(
 
                 if not exists:
 
-                    resultado_cursor = await db.execute(
-                        text("""
-                            INSERT INTO empresa_sync_counters (
-                                empresa_uuid,
-                                ventas_cursor
-                            )
-                            VALUES (:empresa_uuid, 1)
-                            ON CONFLICT (empresa_uuid)
-                            DO UPDATE SET
-                                ventas_cursor =
-                                    empresa_sync_counters.ventas_cursor + 1
-                            RETURNING ventas_cursor
-                        """),
-                        {
-                            "empresa_uuid": empresa_uuid
-                        }
+                    sync_cursor = (
+                        await obtener_siguiente_ventas_cursor(
+                            db,
+                            empresa_uuid
+                        )
                     )
-
-                    sync_cursor = resultado_cursor.scalar_one()
 
                     venta = Venta(
                         id=venta_id,
@@ -2541,26 +2532,46 @@ async def sync_batch(
 
                         sync_cursor=sync_cursor,
 
-                        cliente_id=UUID(
-                            payload["cliente_id"]
-                        )
-                        if payload.get("cliente_id")
-                        else None,
+                        cliente_id=(
+                            UUID(payload["cliente_id"])
+                            if payload.get("cliente_id")
+                            else None
+                        ),
 
                         total=Decimal(
-                            str(payload.get("total", 0))
+                            str(
+                                payload.get(
+                                    "total",
+                                    0
+                                )
+                            )
                         ),
 
                         monto_pagado=Decimal(
-                            str(payload.get("monto_pagado", 0))
+                            str(
+                                payload.get(
+                                    "monto_pagado",
+                                    0
+                                )
+                            )
                         ),
 
                         monto_pendiente=Decimal(
-                            str(payload.get("monto_pendiente", 0))
+                            str(
+                                payload.get(
+                                    "monto_pendiente",
+                                    0
+                                )
+                            )
                         ),
 
                         cambio=Decimal(
-                            str(payload.get("cambio", 0))
+                            str(
+                                payload.get(
+                                    "cambio",
+                                    0
+                                )
+                            )
                         ),
 
                         tipo_pago=payload.get(
@@ -2568,7 +2579,9 @@ async def sync_batch(
                         ),
 
                         fecha=(
-                            parse_datetime(payload["fecha"])
+                            parse_datetime(
+                                payload["fecha"]
+                            )
                             if payload.get("fecha")
                             else None
                         ),
@@ -2577,7 +2590,9 @@ async def sync_batch(
                             parse_datetime(
                                 payload["fecha_vencimiento"]
                             )
-                            if payload.get("fecha_vencimiento")
+                            if payload.get(
+                                "fecha_vencimiento"
+                            )
                             else None
                         ),
 
@@ -2599,22 +2614,25 @@ async def sync_batch(
                             "synced"
                         ),
 
-                        version=payload.get(
-                            "version",
-                            1
+                        version=int(
+                            payload.get(
+                                "version",
+                                1
+                            )
                         ),
 
                         deleted_at=(
                             parse_datetime(
                                 payload["deleted_at"]
                             )
-                            if payload.get("deleted_at")
+                            if payload.get(
+                                "deleted_at"
+                            )
                             else None
                         )
                     )
 
-                    db.add(venta)
-                        
+                    db.add(venta)       
             elif item_type == "movimiento_stock":
 
                 movimiento_id = UUID(payload["id"])
@@ -9711,3 +9729,80 @@ async def enviar_evento(
             empresa_uuid,
             set()
         ).discard(websocket)
+
+async def obtener_siguiente_ventas_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                ventas_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT ventas_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM ventas
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET ventas_cursor = :ventas_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING ventas_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "ventas_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
