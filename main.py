@@ -4751,10 +4751,9 @@ async def productos_changes(
 @app.get("/sync/historial-stock/changes")
 async def historial_stock_changes(
     empresa_uuid: str,
-    since: str | None = None,
+    cursor: int | None = None,
     movimiento_id: str | None = None,
     limit: int = 5000,
-    offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
@@ -4775,7 +4774,9 @@ async def historial_stock_changes(
             detail="Acceso denegado"
         )
 
-    query = select(HistorialStock).where(
+    query = select(
+        HistorialStock
+    ).where(
         HistorialStock.empresa_uuid == empresa_uuid
     )
 
@@ -4786,39 +4787,18 @@ async def historial_stock_changes(
             movimiento_id
         )
 
-    elif since:
-
-        try:
-
-            since_dt = parser.isoparse(
-                since
-            )
-
-        except Exception:
-
-            raise HTTPException(
-                status_code=400,
-                detail="Parámetro since inválido"
-            )
-
-        since_dt = since_dt - timedelta(
-            minutes=5
-        )
+    elif cursor is not None:
 
         query = query.where(
-            HistorialStock.procesado_en >
-            since_dt
+            HistorialStock.sync_cursor > cursor
         )
 
     query = query.order_by(
-        HistorialStock.procesado_en.asc(),
-        HistorialStock.movimiento_id.asc()
+        HistorialStock.sync_cursor.asc()
     )
 
     query = query.limit(
         limit
-    ).offset(
-        offset
     )
 
     result = await db.execute(
@@ -4826,6 +4806,26 @@ async def historial_stock_changes(
     )
 
     movimientos = result.scalars().all()
+
+    print(
+        "SYNC HISTORIAL STOCK:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "movimiento_id": movimiento_id,
+            "cantidad": len(movimientos),
+            "primer_cursor": (
+                movimientos[0].sync_cursor
+                if movimientos
+                else None
+            ),
+            "ultimo_cursor": (
+                movimientos[-1].sync_cursor
+                if movimientos
+                else None
+            )
+        }
+    )
 
     return {
         "items": [
@@ -4870,7 +4870,10 @@ async def historial_stock_changes(
                 "created_at":
                     m.created_at.isoformat()
                     if m.created_at
-                    else None
+                    else None,
+
+                "sync_cursor":
+                    m.sync_cursor
             }
             for m in movimientos
         ],
@@ -4878,7 +4881,7 @@ async def historial_stock_changes(
         "has_more":
             len(movimientos) == limit
     }
-
+    
 @app.get("/sync/ventas/changes")
 async def ventas_changes(
     empresa_uuid: str,
@@ -9061,7 +9064,7 @@ async def restore_historial_stock_changes(
             HistorialStock.empresa_uuid == empresa_uuid
         )
         .order_by(
-            HistorialStock.procesado_en.desc()
+            HistorialStock.sync_cursor.desc()
         )
         .limit(limit)
         .offset(offset)
@@ -9114,7 +9117,10 @@ async def restore_historial_stock_changes(
                 "created_at":
                     m.created_at.isoformat()
                     if m.created_at
-                    else None
+                    else None,
+
+                "sync_cursor":
+                    m.sync_cursor
             }
             for m in movimientos
         ],
@@ -9122,7 +9128,7 @@ async def restore_historial_stock_changes(
         "has_more":
             len(movimientos) == limit
     }
-
+    
 @app.get("/restore/pagos/changes")
 async def restore_pagos_changes(
     empresa_uuid: str,
