@@ -3660,12 +3660,23 @@ async def sync_batch(
                     
             elif item_type == "crear_producto":
 
-                producto_id = UUID(payload["id"])
+                producto_id = UUID(
+                    payload["id"]
+                )
+
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "El producto no contiene empresa_uuid"
+                    )
 
                 q = await db.execute(
                     select(Producto).where(
                         Producto.id == producto_id,
-                        Producto.empresa_uuid == payload["empresa_uuid"]
+                        Producto.empresa_uuid == empresa_uuid
                     )
                 )
 
@@ -3673,51 +3684,119 @@ async def sync_batch(
 
                 if not producto:
 
+                    sync_cursor = (
+                        await obtener_siguiente_productos_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
+
                     producto = Producto(
                         id=producto_id,
-                        empresa_uuid=payload["empresa_uuid"],
-                        codigo_barras=payload.get("codigo_barras"),
-                        codigo_balanza=payload.get("codigo_balanza"),
-                        codigo_interno=payload["codigo_interno"],
-                        es_balanza=payload.get("es_balanza", False),
-                        nombre=payload["nombre"],
-                        precio=payload.get("precio", 0),
-                        costo=payload.get("costo", 0),
-                        stock=payload.get("stock", 0),
-                        stock_minimo=payload.get("stock_minimo", 0),
-                        itbis=payload.get("itbis", 0),
-                        unidad_id=UUID(payload["unidad_id"]),
-                        activo=payload.get("activo", True),
-                        version=payload.get("version", 1),
+
+                        empresa_uuid=empresa_uuid,
+
+                        sync_cursor=sync_cursor,
+
+                        codigo_barras=payload.get(
+                            "codigo_barras"
+                        ),
+
+                        codigo_balanza=payload.get(
+                            "codigo_balanza"
+                        ),
+
+                        codigo_interno=payload[
+                            "codigo_interno"
+                        ],
+
+                        es_balanza=payload.get(
+                            "es_balanza",
+                            False
+                        ),
+
+                        nombre=payload[
+                            "nombre"
+                        ],
+
+                        precio=payload.get(
+                            "precio",
+                            0
+                        ),
+
+                        costo=payload.get(
+                            "costo",
+                            0
+                        ),
+
+                        stock=payload.get(
+                            "stock",
+                            0
+                        ),
+
+                        stock_minimo=payload.get(
+                            "stock_minimo",
+                            0
+                        ),
+
+                        itbis=payload.get(
+                            "itbis",
+                            0
+                        ),
+
+                        unidad_id=UUID(
+                            payload["unidad_id"]
+                        ),
+
+                        activo=payload.get(
+                            "activo",
+                            True
+                        ),
+
+                        version=int(
+                            payload.get(
+                                "version",
+                                1
+                            )
+                        ),
+
                         sync_status="synced",
+
                         created_at=(
-                            parse_datetime(payload["created_at"])
+                            parse_datetime(
+                                payload["created_at"]
+                            )
                             if payload.get("created_at")
                             else None
                         ),
+
                         updated_at=(
-                            parse_datetime(payload["updated_at"])
+                            parse_datetime(
+                                payload["updated_at"]
+                            )
                             if payload.get("updated_at")
                             else None
                         )
                     )
-                    
-                    eventos_ws.append({
-                        "tipo": "producto_actualizado",
-                        "accion": "crear",
-                        "empresa_uuid": str(
-                            payload["empresa_uuid"]
-                        ),
-                        "producto_id": str(
-                            payload["id"]
-                        ),
-                        "version": 1
-                    })
 
                     db.add(producto)
 
                     await db.flush()
-                    
+
+                    eventos_ws.append({
+                        "tipo": "producto_actualizado",
+                        "accion": "crear",
+                        "empresa_uuid": str(
+                            empresa_uuid
+                        ),
+                        "producto_id": str(
+                            producto_id
+                        ),
+                        "version": int(
+                            producto.version
+                        )
+                    })
+            
             elif item_type == "actualizar_cliente":
 
                 cliente_id = payload["id"]
@@ -3773,12 +3852,23 @@ async def sync_batch(
                  
             elif item_type == "actualizar_producto":
 
-                producto_id = payload["id"]
+                producto_id = UUID(
+                    payload["id"]
+                )
+
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "El producto no contiene empresa_uuid"
+                    )
 
                 q = await db.execute(
                     select(Producto).where(
                         Producto.id == producto_id,
-                        Producto.empresa_uuid == payload.get("empresa_uuid")
+                        Producto.empresa_uuid == empresa_uuid
                     )
                 )
 
@@ -3786,55 +3876,120 @@ async def sync_batch(
 
                 if producto:
 
-                    incoming_version = payload.get("version", 1)
-
-                    if incoming_version > producto.version:
-
-                        producto.nombre = payload.get("nombre")
-                        producto.codigo_barras = payload.get("codigo_barras")
-                        producto.itbis = payload.get("itbis", 0)
-                        producto.precio = payload.get("precio", 0)
-                        producto.costo = payload.get("costo", 0)
-                        producto.stock_minimo = payload.get("stock_minimo", 0)
-                 
-                        producto.activo = payload.get("activo", True)
-                        producto.unidad_id = payload.get("unidad_id")
-
-                        producto.sync_status = payload.get(
-                            "sync_status",
-                            "synced"
+                    sync_cursor = (
+                        await obtener_siguiente_productos_cursor(
+                            db,
+                            empresa_uuid
                         )
+                    )
 
-                        producto.deleted_at = payload.get(
-                            "deleted_at"
+                    producto.codigo_barras = payload.get(
+                        "codigo_barras"
+                    )
+
+                    producto.codigo_balanza = payload.get(
+                        "codigo_balanza"
+                    )
+
+                    producto.codigo_interno = payload.get(
+                        "codigo_interno",
+                        producto.codigo_interno
+                    )
+
+                    producto.es_balanza = payload.get(
+                        "es_balanza",
+                        producto.es_balanza
+                    )
+
+                    producto.nombre = payload.get(
+                        "nombre"
+                    )
+
+                    producto.precio = payload.get(
+                        "precio",
+                        0
+                    )
+
+                    producto.costo = payload.get(
+                        "costo",
+                        0
+                    )
+
+                    producto.stock = payload.get(
+                        "stock",
+                        producto.stock
+                    )
+
+                    producto.stock_minimo = payload.get(
+                        "stock_minimo",
+                        0
+                    )
+
+                    producto.itbis = payload.get(
+                        "itbis",
+                        0
+                    )
+
+                    producto.activo = payload.get(
+                        "activo",
+                        True
+                    )
+
+                    producto.unidad_id = (
+                        UUID(
+                            payload["unidad_id"]
                         )
+                        if payload.get("unidad_id")
+                        else producto.unidad_id
+                    )
 
-                        producto.version = incoming_version
+                    producto.sync_status = payload.get(
+                        "sync_status",
+                        "synced"
+                    )
 
-                        producto.updated_at = (
-                            parse_datetime(
-                                payload.get("updated_at")
-                            )
-                            if payload.get("updated_at")
-                            else None
+                    producto.version = int(
+                        payload.get(
+                            "version",
+                            producto.version + 1
                         )
-                        
-                        eventos_ws.append({
-                            "tipo": "producto_actualizado",
-                            "accion": "actualizado",
-                            "empresa_uuid": str(
-                                payload["empresa_uuid"]
-                            ),
-                            "producto_id": str(
-                                payload["id"]
-                            ),
-                            "version": incoming_version
-                        })
+                    )
 
-                        await db.commit()
-                        await db.refresh(producto)
-                        
-                    
+                    producto.sync_cursor = sync_cursor
+
+                    producto.deleted_at = (
+                        parse_datetime(
+                            payload["deleted_at"]
+                        )
+                        if payload.get("deleted_at")
+                        else None
+                    )
+
+                    producto.updated_at = (
+                        parse_datetime(
+                            payload["updated_at"]
+                        )
+                        if payload.get("updated_at")
+                        else None
+                    )
+
+                    eventos_ws.append({
+                        "tipo": "producto_actualizado",
+                        "accion": "actualizado",
+                        "empresa_uuid": str(
+                            empresa_uuid
+                        ),
+                        "producto_id": str(
+                            producto_id
+                        ),
+                        "version": producto.version
+                    })
+
+                    await db.commit()
+
+                    await db.refresh(
+                        producto
+        ) 
                         
                         
                         
@@ -4647,13 +4802,11 @@ async def caja_movimientos_changes(
 @app.get("/sync/productos/changes")
 async def productos_changes(
     empresa_uuid: str,
-    since: str | None = None,
+    cursor: int | None = None,
     limit: int = 5000,
-    offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
-
     token = authorization.replace(
         "Bearer ",
         ""
@@ -4674,34 +4827,52 @@ async def productos_changes(
         Producto.empresa_uuid == empresa_uuid
     )
 
-    if since:
-
-        since_dt = parser.isoparse(since)
-
-        if since_dt.tzinfo:
-            since_dt = since_dt.replace(
-                tzinfo=None
-            )
-
+    if cursor is not None:
         query = query.where(
-            Producto.updated_at > since_dt
+            Producto.sync_cursor > cursor
         )
 
     query = query.order_by(
-        Producto.updated_at.asc()
+        Producto.sync_cursor.asc()
     )
 
-    query = query.limit(limit).offset(offset)
+    query = query.limit(
+        limit
+    )
 
-    result = await db.execute(query)
+    result = await db.execute(
+        query
+    )
 
     productos = result.scalars().all()
+
+    print(
+        "SYNC PRODUCTOS:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(productos),
+            "primer_cursor": (
+                productos[0].sync_cursor
+                if productos
+                else None
+            ),
+            "ultimo_cursor": (
+                productos[-1].sync_cursor
+                if productos
+                else None
+            )
+        }
+    )
 
     return {
         "items": [
             {
-                "id": str(p.id),
-                "empresa_uuid": p.empresa_uuid,
+                "id":
+                    str(p.id),
+
+                "empresa_uuid":
+                    p.empresa_uuid,
 
                 "codigo_barras":
                     p.codigo_barras,
@@ -4736,7 +4907,9 @@ async def productos_changes(
                     float(p.itbis or 0),
 
                 "unidad_id":
-                    str(p.unidad_id),
+                    str(p.unidad_id)
+                    if p.unidad_id
+                    else None,
 
                 "activo":
                     p.activo,
@@ -4746,6 +4919,9 @@ async def productos_changes(
 
                 "version":
                     p.version,
+
+                "sync_cursor":
+                    p.sync_cursor,
 
                 "updated_at":
                     p.updated_at.isoformat()
@@ -4764,9 +4940,11 @@ async def productos_changes(
             }
             for p in productos
         ],
-        "has_more": len(productos) == limit
-    }
 
+        "has_more":
+            len(productos) == limit
+    }
+    
 @app.get("/sync/historial-stock/changes")
 async def historial_stock_changes(
     empresa_uuid: str,
@@ -4900,7 +5078,7 @@ async def historial_stock_changes(
         "has_more":
             len(movimientos) == limit
     }
-    
+
 @app.get("/sync/ventas/changes")
 async def ventas_changes(
     empresa_uuid: str,
@@ -8942,8 +9120,8 @@ async def restore_caja_movimientos_changes(
 @app.get("/restore/productos/changes")
 async def restore_productos_changes(
     empresa_uuid: str,
+    cursor: int | None = None,
     limit: int = 1000,
-    offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
@@ -8964,26 +9142,51 @@ async def restore_productos_changes(
         empresa_uuid
     )
 
-    query = (
-        select(Producto)
-        .where(
-            Producto.empresa_uuid == empresa_uuid
+    query = select(Producto).where(
+        Producto.empresa_uuid == empresa_uuid
+    )
+
+    if cursor is not None:
+        query = query.where(
+            Producto.sync_cursor > cursor
         )
-        .order_by(
-            Producto.updated_at.desc()
-        )
-        .limit(limit)
-        .offset(offset)
+
+    query = query.order_by(
+        Producto.sync_cursor.asc()
+    )
+
+    query = query.limit(
+        limit
     )
 
     result = await db.execute(query)
 
     productos = result.scalars().all()
 
+    print(
+        "RESTORE PRODUCTOS:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(productos),
+            "primer_cursor": (
+                productos[0].sync_cursor
+                if productos
+                else None
+            ),
+            "ultimo_cursor": (
+                productos[-1].sync_cursor
+                if productos
+                else None
+            )
+        }
+    )
+
     return {
         "items": [
             {
-                "id": str(p.id),
+                "id":
+                    str(p.id),
 
                 "empresa_uuid":
                     p.empresa_uuid,
@@ -9032,6 +9235,9 @@ async def restore_productos_changes(
                 "version":
                     p.version,
 
+                "sync_cursor":
+                    p.sync_cursor,
+
                 "updated_at":
                     p.updated_at.isoformat()
                     if p.updated_at
@@ -9049,7 +9255,9 @@ async def restore_productos_changes(
             }
             for p in productos
         ],
-        "has_more": len(productos) == limit
+
+        "has_more":
+            len(productos) == limit
     }
 
 @app.get("/restore/historial-stock/changes")
@@ -9801,6 +10009,83 @@ async def obtener_siguiente_ventas_cursor(
         {
             "empresa_uuid": empresa_uuid,
             "ventas_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
+    
+async def obtener_siguiente_productos_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                productos_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT productos_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM productos
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET productos_cursor = :productos_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING productos_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "productos_cursor": siguiente_cursor
         }
     )
 
