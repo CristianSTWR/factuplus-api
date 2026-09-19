@@ -2417,15 +2417,29 @@ async def sync_batch(
                         
             elif item_type == "crear_caja":
 
-                caja_uuid = UUID(payload["id"])
-                
+                caja_uuid = UUID(
+                    payload["id"]
+                )
+
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "La caja no contiene empresa_uuid"
+                    )
+
                 print("RAW ITEM:", item)
-                print("PAYLOAD TYPE:", type(item.get("payload")))
+                print(
+                    "PAYLOAD TYPE:",
+                    type(item.get("payload"))
+                )
 
                 q = await db.execute(
                     select(CajaConfig).where(
                         CajaConfig.id == caja_uuid,
-                        CajaConfig.empresa_uuid == payload.get("empresa_uuid")
+                        CajaConfig.empresa_uuid == empresa_uuid
                     )
                 )
 
@@ -2433,20 +2447,54 @@ async def sync_batch(
 
                 if not exists:
 
+                    sync_cursor = (
+                        await obtener_siguiente_cajas_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
+
                     caja = CajaConfig(
                         id=caja_uuid,
-                        empresa_uuid=payload.get("empresa_uuid"),
-                        nombre=payload.get("nombre"),
-                        activa=payload.get("activa", True),
 
-                        sync_status=payload.get("sync_status", "synced"),
-                        version=payload.get("version", 1),
+                        empresa_uuid=empresa_uuid,
 
-                        deleted_at=payload.get("deleted_at")
+                        nombre=payload.get(
+                            "nombre"
+                        ),
+
+                        activa=payload.get(
+                            "activa",
+                            True
+                        ),
+
+                        sync_cursor=sync_cursor,
+
+                        sync_status=payload.get(
+                            "sync_status",
+                            "synced"
+                        ),
+
+                        version=int(
+                            payload.get(
+                                "version",
+                                1
+                            )
+                        ),
+
+                        deleted_at=(
+                            parse_datetime(
+                                payload["deleted_at"]
+                            )
+                            if payload.get("deleted_at")
+                            else None
+                        )
                     )
 
                     db.add(caja)
-            
+
+                    await db.flush()
+
             elif item_type == "actualizar_caja":
 
                 caja_id = UUID(payload["id"])
