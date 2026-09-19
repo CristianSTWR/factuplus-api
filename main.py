@@ -2978,23 +2978,12 @@ async def sync_batch(
             
             elif item_type == "asignar_caja":
 
-                caja_id = UUID(
-                    payload["id"]
-                )
-
-                empresa_uuid = payload.get(
-                    "empresa_uuid"
-                )
-
-                if not empresa_uuid:
-                    raise ValueError(
-                        "La caja no contiene empresa_uuid"
-                    )
+                caja_id = UUID(payload["id"])
 
                 q = await db.execute(
                     select(Caja).where(
                         Caja.id == caja_id,
-                        Caja.empresa_uuid == empresa_uuid
+                        Caja.empresa_uuid == payload.get("empresa_uuid")
                     )
                 )
 
@@ -3005,20 +2994,62 @@ async def sync_batch(
                     sync_cursor = (
                         await obtener_siguiente_cajas_cursor(
                             db,
-                            empresa_uuid
+                            payload.get("empresa_uuid")
                         )
                     )
+
+                    fecha_apertura = (
+                        parse_datetime(
+                            payload["fecha_apertura"]
+                        )
+                        if payload.get("fecha_apertura")
+                        else None
+                    )
+
+                    if (
+                        fecha_apertura
+                        and fecha_apertura.tzinfo is not None
+                    ):
+                        fecha_apertura = (
+                            fecha_apertura.replace(
+                                tzinfo=None
+                            )
+                        )
+
+                    updated_at = (
+                        parse_datetime(
+                            payload["updated_at"]
+                        )
+                        if payload.get("updated_at")
+                        else None
+                    )
+
+                    created_at = (
+                        parse_datetime(
+                            payload["created_at"]
+                        )
+                        if payload.get("created_at")
+                        else None
+                    )
+
+                    if (
+                        created_at
+                        and created_at.tzinfo is not None
+                    ):
+                        created_at = (
+                            created_at.replace(
+                                tzinfo=None
+                            )
+                        )
 
                     caja = Caja(
                         id=caja_id,
 
                         empresa_uuid=
-                            empresa_uuid,
+                            payload.get("empresa_uuid"),
 
                         caja_config_id=
-                            UUID(
-                                payload["caja_config_id"]
-                            ),
+                            UUID(payload["caja_config_id"]),
 
                         numero_sesion=
                             int(
@@ -3029,24 +3060,19 @@ async def sync_batch(
                             ),
 
                         usuario_id=
-                            UUID(
-                                payload["usuario_id"]
-                            ),
+                            UUID(payload["usuario_id"]),
 
-                        monto_inicial=
-                            Decimal(
-                                str(
-                                    payload.get(
-                                        "monto_inicial",
-                                        0
-                                    )
+                        monto_inicial=Decimal(
+                            str(
+                                payload.get(
+                                    "monto_inicial",
+                                    0
                                 )
-                            ),
+                            )
+                        ),
 
                         observacion=
-                            payload.get(
-                                "observacion"
-                            ),
+                            payload.get("observacion"),
 
                         estado=
                             payload.get(
@@ -3054,53 +3080,34 @@ async def sync_batch(
                                 "abierta"
                             ),
 
+                        fecha_apertura=
+                            fecha_apertura,
+
                         sync_cursor=
                             sync_cursor,
 
-                        sync_status="synced",
+                        sync_status=
+                            "synced",
 
-                        version=int(
-                            payload.get(
-                                "version",
-                                1
-                            )
-                        ),
+                        version=
+                            int(
+                                payload.get(
+                                    "version",
+                                    1
+                                )
+                            ),
 
-                        fecha_apertura=(
-                            parse_datetime(
-                                payload["fecha_apertura"]
-                            )
-                            if payload.get(
-                                "fecha_apertura"
-                            )
-                            else None
-                        ),
+                        updated_at=
+                            updated_at,
 
-                        updated_at=(
-                            parse_datetime(
-                                payload["updated_at"]
-                            )
-                            if payload.get(
-                                "updated_at"
-                            )
-                            else None
-                        ),
-
-                        created_at=(
-                            parse_datetime(
-                                payload["created_at"]
-                            )
-                            if payload.get(
-                                "created_at"
-                            )
-                            else None
-                        )
+                        created_at=
+                            created_at
                     )
 
                     db.add(caja)
 
                     await db.flush()
-              
+        
             elif item_type == "cerrar_caja":
 
                 caja_id = UUID(payload["id"])
