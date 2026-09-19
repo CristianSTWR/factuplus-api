@@ -2417,29 +2417,15 @@ async def sync_batch(
                         
             elif item_type == "crear_caja":
 
-                caja_uuid = UUID(
-                    payload["id"]
-                )
-
-                empresa_uuid = payload.get(
-                    "empresa_uuid"
-                )
-
-                if not empresa_uuid:
-                    raise ValueError(
-                        "La caja no contiene empresa_uuid"
-                    )
-
+                caja_uuid = UUID(payload["id"])
+                
                 print("RAW ITEM:", item)
-                print(
-                    "PAYLOAD TYPE:",
-                    type(item.get("payload"))
-                )
+                print("PAYLOAD TYPE:", type(item.get("payload")))
 
                 q = await db.execute(
                     select(CajaConfig).where(
                         CajaConfig.id == caja_uuid,
-                        CajaConfig.empresa_uuid == empresa_uuid
+                        CajaConfig.empresa_uuid == payload.get("empresa_uuid")
                     )
                 )
 
@@ -2447,54 +2433,20 @@ async def sync_batch(
 
                 if not exists:
 
-                    sync_cursor = (
-                        await obtener_siguiente_cajas_cursor(
-                            db,
-                            empresa_uuid
-                        )
-                    )
-
                     caja = CajaConfig(
                         id=caja_uuid,
+                        empresa_uuid=payload.get("empresa_uuid"),
+                        nombre=payload.get("nombre"),
+                        activa=payload.get("activa", True),
 
-                        empresa_uuid=empresa_uuid,
+                        sync_status=payload.get("sync_status", "synced"),
+                        version=payload.get("version", 1),
 
-                        nombre=payload.get(
-                            "nombre"
-                        ),
-
-                        activa=payload.get(
-                            "activa",
-                            True
-                        ),
-
-                        sync_cursor=sync_cursor,
-
-                        sync_status=payload.get(
-                            "sync_status",
-                            "synced"
-                        ),
-
-                        version=int(
-                            payload.get(
-                                "version",
-                                1
-                            )
-                        ),
-
-                        deleted_at=(
-                            parse_datetime(
-                                payload["deleted_at"]
-                            )
-                            if payload.get("deleted_at")
-                            else None
-                        )
+                        deleted_at=payload.get("deleted_at")
                     )
 
                     db.add(caja)
-
-                    await db.flush()
-
+            
             elif item_type == "actualizar_caja":
 
                 caja_id = UUID(payload["id"])
@@ -3078,45 +3030,33 @@ async def sync_batch(
                     
             elif item_type == "cerrar_caja":
 
-                caja_id = UUID(
-                    payload["id"]
-                )
-
-                empresa_uuid = payload.get(
-                    "empresa_uuid"
-                )
-
-                if not empresa_uuid:
-                    raise ValueError(
-                        "La caja no contiene empresa_uuid"
-                    )
+                caja_id = UUID(payload["id"])
 
                 q = await db.execute(
                     select(Caja).where(
                         Caja.id == caja_id,
-                        Caja.empresa_uuid == empresa_uuid
+                        Caja.empresa_uuid ==
+                            payload["empresa_uuid"]
                     )
                 )
-
+                
                 print(
-                    "CERRAR CAJA:",
-                    payload
-                )
+                        "CERRAR CAJA:",
+                        payload
+                    )
+              
 
                 caja = q.scalar_one_or_none()
 
                 if caja:
 
-                    sync_cursor = (
-                        await obtener_siguiente_cajas_cursor(
-                            db,
-                            empresa_uuid
-                        )
-                    )
+                    incoming_version = payload.get("version", 1)
 
-                    caja.estado = "cerrada"
+                    if incoming_version >= caja.version:
 
-                    caja.fecha_cierre = (
+                        caja.estado = "cerrada"
+
+                        caja.fecha_cierre = (
                         parse_datetime(
                             payload.get("fecha_cierre")
                         )
@@ -3124,63 +3064,50 @@ async def sync_batch(
                         else None
                     )
 
-                    caja.monto_contado = (
-                        payload.get(
-                            "monto_contado"
-                        )
-                    )
-
-                    caja.diferencia = (
-                        payload.get(
-                            "diferencia"
-                        )
-                    )
-
-                    caja.motivo_cierre = (
-                        payload.get(
-                            "motivo_cierre"
-                        )
-                    )
-
-                    caja.tipo_cierre = (
-                        payload.get(
-                            "tipo_cierre"
-                        )
-                    )
-
-                    caja.cerrada_por = (
-                        payload.get(
-                            "cerrada_por"
-                        )
-                    )
-
-                    caja.version = int(
-                        payload.get(
-                            "version",
-                            caja.version
-                        )
-                    )
-
-                    caja.sync_cursor = (
-                        sync_cursor
-                    )
-
-                    caja.sync_status = "synced"
-
-                    caja.updated_at = (
-                        parse_datetime(
+                        caja.monto_contado = (
                             payload.get(
-                                "updated_at"
+                                "monto_contado"
                             )
                         )
-                        if payload.get(
-                            "updated_at"
+
+                        caja.diferencia = (
+                            payload.get(
+                                "diferencia"
+                            )
                         )
+
+                        caja.motivo_cierre = (
+                            payload.get(
+                                "motivo_cierre"
+                            )
+                        )
+
+                        caja.tipo_cierre = (
+                            payload.get(
+                                "tipo_cierre"
+                            )
+                        )
+
+                        caja.cerrada_por = (
+                            payload.get(
+                                "cerrada_por"
+                            )
+                        )
+
+                        caja.version = (
+                            incoming_version
+                        )
+
+                        caja.updated_at = (
+                        parse_datetime(
+                            payload.get("updated_at")
+                        )
+                        if payload.get("updated_at")
                         else None
                     )
 
-                    await db.flush()
-                 
+                        await db.flush()
+                        
             elif item_type == "eliminar_caja":
 
                 caja_id = UUID(payload["id"])
@@ -4638,11 +4565,13 @@ async def cajas_config_changes(
 @app.get("/sync/cajas/changes")
 async def cajas_changes(
     empresa_uuid: str,
-    cursor: int | None = None,
+    since: str | None = None,
     limit: int = 5000,
+    offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
+
     token = authorization.replace(
         "Bearer ",
         ""
@@ -4663,138 +4592,94 @@ async def cajas_changes(
         Caja.empresa_uuid == empresa_uuid
     )
 
-    if cursor is not None:
+    if since:
+
+        since_dt = parser.isoparse(since)
+
+        if since_dt.tzinfo:
+            since_dt = since_dt.replace(
+                tzinfo=None
+            )
+
         query = query.where(
-            Caja.sync_cursor > cursor
+            Caja.updated_at > since_dt
         )
 
     query = query.order_by(
-        Caja.sync_cursor.asc()
+        Caja.updated_at.asc()
     )
 
-    query = query.limit(
-        limit
-    )
+    query = query.limit(limit).offset(offset)
 
-    result = await db.execute(
-        query
-    )
+    result = await db.execute(query)
 
     cajas = result.scalars().all()
-
-    print(
-        "SYNC CAJAS:",
-        {
-            "empresa_uuid": empresa_uuid,
-            "cursor_recibido": cursor,
-            "cantidad": len(cajas),
-            "primer_cursor": (
-                cajas[0].sync_cursor
-                if cajas
-                else None
-            ),
-            "ultimo_cursor": (
-                cajas[-1].sync_cursor
-                if cajas
-                else None
-            )
-        }
-    )
 
     return {
         "items": [
             {
                 "id": str(c.id),
                 "empresa_uuid": c.empresa_uuid,
-                "caja_config_id": (
-                    str(c.caja_config_id)
-                    if c.caja_config_id
-                    else None
-                ),
+                "caja_config_id": str(c.caja_config_id),
 
-                "numero_sesion": (
+                "numero_sesion":
                     int(c.numero_sesion)
                     if c.numero_sesion is not None
-                    else None
-                ),
+                    else None,
 
-                "usuario_id": (
-                    str(c.usuario_id)
-                    if c.usuario_id
-                    else None
-                ),
+                "usuario_id": str(c.usuario_id),
 
-                "monto_inicial": float(
-                    c.monto_inicial or 0
-                ),
+                "monto_inicial":
+                    float(c.monto_inicial or 0),
 
-                "monto_contado": (
+                "monto_contado":
                     float(c.monto_contado)
                     if c.monto_contado is not None
-                    else None
-                ),
+                    else None,
 
-                "diferencia": (
+                "diferencia":
                     float(c.diferencia)
                     if c.diferencia is not None
-                    else None
-                ),
+                    else None,
 
                 "observacion": c.observacion,
                 "motivo_cierre": c.motivo_cierre,
                 "tipo_cierre": c.tipo_cierre,
 
-                "cerrada_por": (
+                "cerrada_por":
                     str(c.cerrada_por)
                     if c.cerrada_por
-                    else None
-                ),
+                    else None,
 
                 "estado": c.estado,
                 "sync_status": c.sync_status,
                 "version": c.version,
 
-                "sync_cursor": (
-                    int(c.sync_cursor)
-                    if c.sync_cursor is not None
-                    else None
-                ),
-
-                "fecha_apertura": (
+                "fecha_apertura":
                     c.fecha_apertura.isoformat()
                     if c.fecha_apertura
-                    else None
-                ),
+                    else None,
 
-                "fecha_cierre": (
+                "fecha_cierre":
                     c.fecha_cierre.isoformat()
                     if c.fecha_cierre
-                    else None
-                ),
+                    else None,
 
-                "updated_at": (
+                "updated_at":
                     c.updated_at.isoformat()
                     if c.updated_at
-                    else None
-                ),
+                    else None,
 
-                "created_at": (
+                "created_at":
                     c.created_at.isoformat()
                     if c.created_at
                     else None
-                ),
-
-                "deleted_at": (
-                    c.deleted_at.isoformat()
-                    if getattr(c, "deleted_at", None)
-                    else None
-                )
             }
             for c in cajas
         ],
         "has_more": len(cajas) == limit
-    }
-    
+    } 
+
 @app.get("/sync/caja_movimientos/changes")
 async def caja_movimientos_changes(
     empresa_uuid: str,
@@ -8814,8 +8699,8 @@ async def restore_roles_changes(
 @app.get("/restore/cajas/changes")
 async def restore_cajas_changes(
     empresa_uuid: str,
-    cursor: int | None = None,
-    limit: int = 1000,
+    limit: int = 5000,
+    offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
@@ -8836,47 +8721,21 @@ async def restore_cajas_changes(
         empresa_uuid
     )
 
-    query = select(Caja).where(
-        Caja.empresa_uuid == empresa_uuid
-    )
-
-    if cursor is not None:
-        query = query.where(
-            Caja.sync_cursor > cursor
+    query = (
+        select(Caja)
+        .where(
+            Caja.empresa_uuid == empresa_uuid
         )
-
-    query = query.order_by(
-        Caja.sync_cursor.asc()
+        .order_by(
+            Caja.updated_at.asc()
+        )
+        .limit(limit)
+        .offset(offset)
     )
 
-    query = query.limit(
-        limit
-    )
-
-    result = await db.execute(
-        query
-    )
+    result = await db.execute(query)
 
     cajas = result.scalars().all()
-
-    print(
-        "RESTORE CAJAS:",
-        {
-            "empresa_uuid": empresa_uuid,
-            "cursor_recibido": cursor,
-            "cantidad": len(cajas),
-            "primer_cursor": (
-                cajas[0].sync_cursor
-                if cajas
-                else None
-            ),
-            "ultimo_cursor": (
-                cajas[-1].sync_cursor
-                if cajas
-                else None
-            )
-        }
-    )
 
     return {
         "items": [
@@ -8887,11 +8746,7 @@ async def restore_cajas_changes(
                     c.empresa_uuid,
 
                 "caja_config_id":
-                    (
-                        str(c.caja_config_id)
-                        if c.caja_config_id
-                        else None
-                    ),
+                    str(c.caja_config_id),
 
                 "numero_sesion":
                     int(c.numero_sesion)
@@ -8899,11 +8754,7 @@ async def restore_cajas_changes(
                     else None,
 
                 "usuario_id":
-                    (
-                        str(c.usuario_id)
-                        if c.usuario_id
-                        else None
-                    ),
+                    str(c.usuario_id),
 
                 "monto_inicial":
                     float(c.monto_inicial or 0),
@@ -8928,11 +8779,9 @@ async def restore_cajas_changes(
                     c.tipo_cierre,
 
                 "cerrada_por":
-                    (
-                        str(c.cerrada_por)
-                        if c.cerrada_por
-                        else None
-                    ),
+                    str(c.cerrada_por)
+                    if c.cerrada_por
+                    else None,
 
                 "estado":
                     c.estado,
@@ -8943,55 +8792,31 @@ async def restore_cajas_changes(
                 "version":
                     c.version,
 
-                "sync_cursor":
-                    (
-                        int(c.sync_cursor)
-                        if c.sync_cursor is not None
-                        else None
-                    ),
-
                 "fecha_apertura":
-                    (
-                        c.fecha_apertura.isoformat()
-                        if c.fecha_apertura
-                        else None
-                    ),
+                    c.fecha_apertura.isoformat()
+                    if c.fecha_apertura
+                    else None,
 
                 "fecha_cierre":
-                    (
-                        c.fecha_cierre.isoformat()
-                        if c.fecha_cierre
-                        else None
-                    ),
+                    c.fecha_cierre.isoformat()
+                    if c.fecha_cierre
+                    else None,
 
                 "updated_at":
-                    (
-                        c.updated_at.isoformat()
-                        if c.updated_at
-                        else None
-                    ),
+                    c.updated_at.isoformat()
+                    if c.updated_at
+                    else None,
 
                 "created_at":
-                    (
-                        c.created_at.isoformat()
-                        if c.created_at
-                        else None
-                    ),
-
-                "deleted_at":
-                    (
-                        c.deleted_at.isoformat()
-                        if getattr(c, "deleted_at", None)
-                        else None
-                    )
+                    c.created_at.isoformat()
+                    if c.created_at
+                    else None
             }
             for c in cajas
         ],
-
-        "has_more":
-            len(cajas) == limit
+        "has_more": len(cajas) == limit
     }
-     
+    
 @app.get("/restore/rol-permisos/changes")
 async def restore_rol_permisos_changes(
     empresa_uuid: str,
@@ -10187,82 +10012,3 @@ async def obtener_siguiente_productos_cursor(
     return int(
         resultado_final.scalar_one()
     )
-    
-async def obtener_siguiente_cajas_cursor(
-    db: AsyncSession,
-    empresa_uuid: str
-):
-    await db.execute(
-        text("""
-            INSERT INTO empresa_sync_counters (
-                empresa_uuid,
-                cajas_cursor
-            )
-            VALUES (
-                :empresa_uuid,
-                0
-            )
-            ON CONFLICT (empresa_uuid)
-            DO NOTHING
-        """),
-        {
-            "empresa_uuid": empresa_uuid
-        }
-    )
-
-    resultado = await db.execute(
-        text("""
-            SELECT cajas_cursor
-            FROM empresa_sync_counters
-            WHERE empresa_uuid = :empresa_uuid
-            FOR UPDATE
-        """),
-        {
-            "empresa_uuid": empresa_uuid
-        }
-    )
-
-    cursor_actual = int(
-        resultado.scalar_one() or 0
-    )
-
-    resultado_max = await db.execute(
-        text("""
-            SELECT COALESCE(
-                MAX(sync_cursor),
-                0
-            )
-            FROM cajas
-            WHERE empresa_uuid = :empresa_uuid
-        """),
-        {
-            "empresa_uuid": empresa_uuid
-        }
-    )
-
-    max_cursor = int(
-        resultado_max.scalar_one() or 0
-    )
-
-    siguiente_cursor = (
-        max(cursor_actual, max_cursor) + 1
-    )
-
-    resultado_final = await db.execute(
-        text("""
-            UPDATE empresa_sync_counters
-            SET cajas_cursor = :cajas_cursor
-            WHERE empresa_uuid = :empresa_uuid
-            RETURNING cajas_cursor
-        """),
-        {
-            "empresa_uuid": empresa_uuid,
-            "cajas_cursor": siguiente_cursor
-        }
-    )
-
-    return int(
-        resultado_final.scalar_one()
-    )
-    
-"""  """

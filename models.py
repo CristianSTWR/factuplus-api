@@ -559,6 +559,12 @@ class CajaConfig(Base):
         server_default=text("CURRENT_TIMESTAMP")
     )
     
+    sync_cursor: Mapped[int] = mapped_column(
+                        BigInteger,
+                        unique=True,
+                        nullable=False
+                    )
+    
 class HistorialStock(Base):
     __tablename__ = "historial_stock"
 
