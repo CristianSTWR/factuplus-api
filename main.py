@@ -3103,23 +3103,13 @@ async def sync_batch(
               
             elif item_type == "cerrar_caja":
 
-                caja_id = UUID(
-                    payload["id"]
-                )
-
-                empresa_uuid = payload.get(
-                    "empresa_uuid"
-                )
-
-                if not empresa_uuid:
-                    raise ValueError(
-                        "La caja no contiene empresa_uuid"
-                    )
+                caja_id = UUID(payload["id"])
 
                 q = await db.execute(
                     select(Caja).where(
                         Caja.id == caja_id,
-                        Caja.empresa_uuid == empresa_uuid
+                        Caja.empresa_uuid ==
+                            payload["empresa_uuid"]
                     )
                 )
 
@@ -3132,75 +3122,85 @@ async def sync_batch(
 
                 if caja:
 
-                    sync_cursor = (
-                        await obtener_siguiente_cajas_cursor(
-                            db,
-                            empresa_uuid
-                        )
-                    )
+                    incoming_version = payload.get("version", 1)
 
-                    fecha_cierre = (
-                        parse_datetime(
-                            payload["fecha_cierre"]
-                        )
-                        if payload.get("fecha_cierre")
-                        else None
-                    )
+                    if incoming_version >= caja.version:
 
-                    if fecha_cierre and fecha_cierre.tzinfo is not None:
-                        fecha_cierre = fecha_cierre.replace(
-                            tzinfo=None
+                        sync_cursor = (
+                            await obtener_siguiente_cajas_cursor(
+                                db,
+                                payload["empresa_uuid"]
+                            )
                         )
 
-                    updated_at = (
-                        parse_datetime(
-                            payload["updated_at"]
+                        caja.estado = "cerrada"
+
+                        caja.fecha_cierre = (
+                            parse_datetime(
+                                payload.get("fecha_cierre")
+                            )
+                            if payload.get("fecha_cierre")
+                            else None
                         )
-                        if payload.get("updated_at")
-                        else None
-                    )
 
-                    caja.estado = "cerrada"
+                        if (
+                            caja.fecha_cierre
+                            and caja.fecha_cierre.tzinfo is not None
+                        ):
+                            caja.fecha_cierre = (
+                                caja.fecha_cierre.replace(
+                                    tzinfo=None
+                                )
+                            )
 
-                    caja.fecha_cierre = fecha_cierre
-
-                    caja.monto_contado = (
-                        payload.get("monto_contado")
-                    )
-
-                    caja.diferencia = (
-                        payload.get("diferencia")
-                    )
-
-                    caja.motivo_cierre = (
-                        payload.get("motivo_cierre")
-                    )
-
-                    caja.tipo_cierre = (
-                        payload.get("tipo_cierre")
-                    )
-
-                    caja.cerrada_por = (
-                        UUID(payload["cerrada_por"])
-                        if payload.get("cerrada_por")
-                        else None
-                    )
-
-                    caja.version = int(
-                        payload.get(
-                            "version",
-                            caja.version
+                        caja.monto_contado = (
+                            payload.get(
+                                "monto_contado"
+                            )
                         )
-                    )
 
-                    caja.sync_cursor = sync_cursor
+                        caja.diferencia = (
+                            payload.get(
+                                "diferencia"
+                            )
+                        )
 
-                    caja.sync_status = "synced"
+                        caja.motivo_cierre = (
+                            payload.get(
+                                "motivo_cierre"
+                            )
+                        )
 
-                    caja.updated_at = updated_at
+                        caja.tipo_cierre = (
+                            payload.get(
+                                "tipo_cierre"
+                            )
+                        )
 
-                    await db.flush()
-        
+                        caja.cerrada_por = (
+                            payload.get(
+                                "cerrada_por"
+                            )
+                        )
+
+                        caja.version = (
+                            incoming_version
+                        )
+
+                        caja.sync_cursor = sync_cursor
+
+                        caja.sync_status = "synced"
+
+                        caja.updated_at = (
+                            parse_datetime(
+                                payload.get("updated_at")
+                            )
+                            if payload.get("updated_at")
+                            else None
+                        )
+
+                        await db.flush()
+            
             elif item_type == "eliminar_caja":
 
                 caja_id = UUID(payload["id"])

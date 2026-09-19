@@ -1079,6 +1079,7 @@ class Pago(Base):
 
       
 class Caja(Base):
+
     __tablename__ = "cajas"
 
     id: Mapped[UUID] = mapped_column(
@@ -1099,7 +1100,7 @@ class Caja(Base):
         ForeignKey("cajas_config.id", ondelete="CASCADE"),
         nullable=False
     )
-
+    
     numero_sesion: Mapped[int] = mapped_column(
         BigInteger,
         unique=True,
@@ -1112,27 +1113,11 @@ class Caja(Base):
         nullable=False
     )
 
-    fecha_apertura: Mapped[datetime] = mapped_column(
-        DateTime,
-        nullable=False,
-        server_default=text("CURRENT_TIMESTAMP")
-    )
-
-    fecha_cierre: Mapped[datetime | None] = mapped_column(
-        DateTime,
-        nullable=True
-    )
-
     monto_inicial: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
         default=0,
         server_default=text("0")
-    )
-
-    monto_final: Mapped[Decimal | None] = mapped_column(
-        Numeric(10, 2),
-        nullable=True
     )
 
     monto_contado: Mapped[Decimal | None] = mapped_column(
@@ -1150,39 +1135,34 @@ class Caja(Base):
         nullable=True
     )
 
+    motivo_cierre: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    tipo_cierre: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True
+    )
+
     cerrada_por: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("usuarios.id"),
         nullable=True
     )
 
-    tipo_cierre: Mapped[str | None] = mapped_column(
-        String(30),
-        nullable=True
-    )
-
-    motivo_cierre: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True
-    )
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+    estado: Mapped[str] = mapped_column(
+        String(20),
         nullable=False,
-        server_default=text("CURRENT_TIMESTAMP")
-    )
-
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-        server_default=text("CURRENT_TIMESTAMP")
+        default="abierta",
+        server_default=text("'abierta'")
     )
 
     sync_status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
-        default="synced",
-        server_default=text("'synced'")
+        default="pending",
+        server_default=text("'pending'")
     )
 
     version: Mapped[int] = mapped_column(
@@ -1192,19 +1172,35 @@ class Caja(Base):
         server_default=text("1")
     )
 
-    sync_cursor: Mapped[int] = mapped_column(
-        BigInteger,
-        unique=True,
-        nullable=False
+    fecha_apertura: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP")
     )
 
-    estado: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-        default="abierta",
-        server_default=text("'abierta'")
+    fecha_cierre: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
     )
-       
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+    
+    sync_cursor: Mapped[int] = mapped_column(
+                    BigInteger,
+                    unique=True,
+                    nullable=False
+                )
+    
 class UnidadMedida(Base):
 
     __tablename__ = "unidades_medida"
