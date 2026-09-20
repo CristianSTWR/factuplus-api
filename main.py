@@ -5339,13 +5339,11 @@ async def ventas_changes(
 @app.get("/sync/pagos/changes")
 async def pagos_changes(
     empresa_uuid: str,
-    since: str | None = None,
+    cursor: int | None = None,
     limit: int = 5000,
-    offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
-
     token = authorization.replace(
         "Bearer ",
         ""
@@ -5366,34 +5364,51 @@ async def pagos_changes(
         Pago.empresa_uuid == empresa_uuid
     )
 
-    if since:
-
-        since_dt = parser.isoparse(since)
-
-        if since_dt.tzinfo:
-            since_dt = since_dt.replace(
-                tzinfo=None
-            )
-
+    if cursor is not None:
         query = query.where(
-            Pago.updated_at > since_dt
+            Pago.sync_cursor > cursor
         )
 
     query = query.order_by(
-        Pago.updated_at.asc()
+        Pago.sync_cursor.asc()
     )
 
-    query = query.limit(limit).offset(offset)
+    query = query.limit(
+        limit
+    )
 
-    result = await db.execute(query)
+    result = await db.execute(
+        query
+    )
 
     pagos = result.scalars().all()
+
+    print(
+        "SYNC PAGOS:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(pagos),
+            "primer_cursor": (
+                pagos[0].sync_cursor
+                if pagos
+                else None
+            ),
+            "ultimo_cursor": (
+                pagos[-1].sync_cursor
+                if pagos
+                else None
+            )
+        }
+    )
 
     return {
         "items": [
             {
                 "id": str(p.id),
-                "empresa_uuid": p.empresa_uuid,
+
+                "empresa_uuid":
+                    p.empresa_uuid,
 
                 "cliente_id":
                     str(p.cliente_id)
@@ -5438,6 +5453,9 @@ async def pagos_changes(
                 "version":
                     p.version,
 
+                "sync_cursor":
+                    p.sync_cursor,
+
                 "deleted_at":
                     p.deleted_at.isoformat()
                     if p.deleted_at
@@ -5455,9 +5473,11 @@ async def pagos_changes(
             }
             for p in pagos
         ],
-        "has_more": len(pagos) == limit
-    }
 
+        "has_more":
+            len(pagos) == limit
+    }
+    
 @app.get("/sync/venta-detalles/changes")
 async def venta_detalles_changes(
     empresa_uuid: str,
@@ -9478,7 +9498,7 @@ async def restore_historial_stock_changes(
         "has_more":
             len(movimientos) == limit
     }
-    
+
 @app.get("/restore/pagos/changes")
 async def restore_pagos_changes(
     empresa_uuid: str,
@@ -9510,7 +9530,7 @@ async def restore_pagos_changes(
             Pago.empresa_uuid == empresa_uuid
         )
         .order_by(
-            Pago.updated_at.desc()
+            Pago.sync_cursor.desc()
         )
         .limit(limit)
         .offset(offset)
@@ -9571,6 +9591,9 @@ async def restore_pagos_changes(
                 "version":
                     p.version,
 
+                "sync_cursor":
+                    p.sync_cursor,
+
                 "updated_at":
                     p.updated_at.isoformat()
                     if p.updated_at
@@ -9588,7 +9611,9 @@ async def restore_pagos_changes(
             }
             for p in pagos
         ],
-        "has_more": len(pagos) == limit
+
+        "has_more":
+            len(pagos) == limit
     }
 
 @app.get("/restore/venta-detalles/changes")
@@ -10286,6 +10311,83 @@ async def obtener_siguiente_productos_cursor(
         {
             "empresa_uuid": empresa_uuid,
             "productos_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
+    
+async def obtener_siguiente_pagos_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                pagos_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT pagos_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM pagos
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET pagos_cursor = :pagos_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING pagos_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "pagos_cursor": siguiente_cursor
         }
     )
 
