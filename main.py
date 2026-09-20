@@ -2632,8 +2632,230 @@ async def sync_batch(
                         )
                     )
 
-                    db.add(venta)       
-         
+                    db.add(venta)
+
+                    await db.flush()
+
+                    pagos = payload.get(
+                        "pagos",
+                        []
+                    )
+
+                    for pago_data in pagos:
+
+                        pago_id = UUID(
+                            pago_data["id"]
+                        )
+
+                        q_pago = await db.execute(
+                            select(Pago).where(
+                                Pago.id == pago_id,
+                                Pago.empresa_uuid == empresa_uuid
+                            )
+                        )
+
+                        pago_exists = (
+                            q_pago.scalar_one_or_none()
+                        )
+
+                        if pago_exists:
+                            continue
+
+                        pago_cursor = (
+                            await obtener_siguiente_pagos_cursor(
+                                db,
+                                empresa_uuid
+                            )
+                        )
+
+                        pago = Pago(
+                            id=pago_id,
+
+                            empresa_uuid=empresa_uuid,
+
+                            venta_id=venta_id,
+
+                            sync_cursor=pago_cursor,
+
+                            monto=Decimal(
+                                str(
+                                    pago_data.get(
+                                        "monto",
+                                        0
+                                    )
+                                )
+                            ),
+
+                            metodo_pago=pago_data.get(
+                                "metodo_pago"
+                            ),
+
+                            referencia=pago_data.get(
+                                "referencia"
+                            ),
+
+                            sync_status=pago_data.get(
+                                "sync_status",
+                                "synced"
+                            ),
+
+                            version=int(
+                                pago_data.get(
+                                    "version",
+                                    1
+                                )
+                            ),
+
+                            deleted_at=(
+                                parse_datetime(
+                                    pago_data["deleted_at"]
+                                )
+                                if pago_data.get(
+                                    "deleted_at"
+                                )
+                                else None
+                            ),
+
+                            created_at=(
+                                parse_datetime(
+                                    pago_data["created_at"]
+                                )
+                                if pago_data.get(
+                                    "created_at"
+                                )
+                                else None
+                            ),
+
+                            updated_at=(
+                                parse_datetime(
+                                    pago_data["updated_at"]
+                                )
+                                if pago_data.get(
+                                    "updated_at"
+                                )
+                                else None
+                            )
+                        )
+
+                        db.add(pago)
+
+                    detalles = payload.get(
+                        "detalles",
+                        []
+                    )
+
+                    for detalle_data in detalles:
+
+                        detalle_id = UUID(
+                            detalle_data["id"]
+                        )
+
+                        q_detalle = await db.execute(
+                            select(VentaDetalle).where(
+                                VentaDetalle.id == detalle_id,
+                                VentaDetalle.empresa_uuid == empresa_uuid
+                            )
+                        )
+
+                        detalle_exists = (
+                            q_detalle.scalar_one_or_none()
+                        )
+
+                        if detalle_exists:
+                            continue
+
+                        detalle_cursor = (
+                            await obtener_siguiente_venta_detalle_cursor(
+                                db,
+                                empresa_uuid
+                            )
+                        )
+
+                        detalle = VentaDetalle(
+                            id=detalle_id,
+
+                            empresa_uuid=empresa_uuid,
+
+                            venta_id=venta_id,
+
+                            producto_id=UUID(
+                                detalle_data["producto_id"]
+                            ),
+
+                            cantidad=Decimal(
+                                str(
+                                    detalle_data.get(
+                                        "cantidad",
+                                        0
+                                    )
+                                )
+                            ),
+
+                            precio_unitario=Decimal(
+                                str(
+                                    detalle_data.get(
+                                        "precio_unitario",
+                                        0
+                                    )
+                                )
+                            ),
+
+                            subtotal=Decimal(
+                                str(
+                                    detalle_data.get(
+                                        "subtotal",
+                                        0
+                                    )
+                                )
+                            ),
+
+                            sync_status=detalle_data.get(
+                                "sync_status",
+                                "synced"
+                            ),
+
+                            version=int(
+                                detalle_data.get(
+                                    "version",
+                                    1
+                                )
+                            ),
+
+                            sync_cursor=detalle_cursor,
+
+                            deleted_at=(
+                                parse_datetime(
+                                    detalle_data["deleted_at"]
+                                )
+                                if detalle_data.get(
+                                    "deleted_at"
+                                )
+                                else None
+                            ),
+
+                            created_at=(
+                                parse_datetime(
+                                    detalle_data["created_at"]
+                                )
+                                if detalle_data.get(
+                                    "created_at"
+                                )
+                                else None
+                            ),
+
+                            updated_at=(
+                                parse_datetime(
+                                    detalle_data["updated_at"]
+                                )
+                                if detalle_data.get(
+                                    "updated_at"
+                                )
+                                else None
+                            )
+                        )
+
+                        db.add(detalle)
+            
             elif item_type == "movimiento_stock":
 
                 movimiento_id = UUID(payload["id"])
@@ -10418,3 +10640,81 @@ async def obtener_siguiente_pagos_cursor(
     return int(
         resultado_final.scalar_one()
     )
+    
+async def obtener_siguiente_ventas_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                ventas_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT ventas_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM ventas
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET ventas_cursor = :ventas_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING ventas_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "ventas_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
+   
