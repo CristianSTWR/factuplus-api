@@ -2673,9 +2673,17 @@ async def sync_batch(
 
                             empresa_uuid=empresa_uuid,
 
+                            cliente_id=(
+                                UUID(pago_data["cliente_id"])
+                                if pago_data.get("cliente_id")
+                                else None
+                            ),
+
                             venta_id=venta_id,
 
-                            sync_cursor=pago_cursor,
+                            metodo_pago_id=UUID(
+                                pago_data["metodo_pago_id"]
+                            ),
 
                             monto=Decimal(
                                 str(
@@ -2686,12 +2694,37 @@ async def sync_batch(
                                 )
                             ),
 
-                            metodo_pago=pago_data.get(
-                                "metodo_pago"
-                            ),
-
                             referencia=pago_data.get(
                                 "referencia"
+                            ),
+
+                            autorizacion=pago_data.get(
+                                "autorizacion"
+                            ),
+
+                            ultimos_4=pago_data.get(
+                                "ultimos_4"
+                            ),
+
+                            banco=pago_data.get(
+                                "banco"
+                            ),
+
+                            observacion=pago_data.get(
+                                "observacion"
+                            ),
+
+                            estado=pago_data.get(
+                                "estado",
+                                "aprobado"
+                            ),
+
+                            fecha=(
+                                parse_datetime(
+                                    pago_data["fecha"]
+                                )
+                                if pago_data.get("fecha")
+                                else None
                             ),
 
                             sync_status=pago_data.get(
@@ -2734,11 +2767,13 @@ async def sync_batch(
                                     "updated_at"
                                 )
                                 else None
-                            )
+                            ),
+
+                            sync_cursor=pago_cursor
                         )
 
                         db.add(pago)
-
+    
                     detalles = payload.get(
                         "detalles",
                         []
