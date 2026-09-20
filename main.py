@@ -3403,15 +3403,6 @@ async def sync_batch(
                         else None
                     )
 
-                    if (
-                        caja.fecha_cierre
-                        and caja.fecha_cierre.tzinfo is not None
-                    ):
-                        caja.fecha_cierre = (
-                            caja.fecha_cierre.replace(
-                                tzinfo=None
-                            )
-                        )
 
                     caja.monto_contado = (
                         payload.get(
