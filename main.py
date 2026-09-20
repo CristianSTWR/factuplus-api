@@ -5481,13 +5481,11 @@ async def pagos_changes(
 @app.get("/sync/venta-detalles/changes")
 async def venta_detalles_changes(
     empresa_uuid: str,
-    since: str | None = None,
+    cursor: int | None = None,
     limit: int = 5000,
-    offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
-
     token = authorization.replace(
         "Bearer ",
         ""
@@ -5508,34 +5506,51 @@ async def venta_detalles_changes(
         VentaDetalle.empresa_uuid == empresa_uuid
     )
 
-    if since:
-
-        since_dt = parser.isoparse(since)
-
-        if since_dt.tzinfo:
-            since_dt = since_dt.replace(
-                tzinfo=None
-            )
-
+    if cursor is not None:
         query = query.where(
-            VentaDetalle.updated_at > since_dt
+            VentaDetalle.sync_cursor > cursor
         )
 
     query = query.order_by(
-        VentaDetalle.updated_at.asc()
+        VentaDetalle.sync_cursor.asc()
     )
 
-    query = query.limit(limit).offset(offset)
+    query = query.limit(
+        limit
+    )
 
-    result = await db.execute(query)
+    result = await db.execute(
+        query
+    )
 
     detalles = result.scalars().all()
+
+    print(
+        "SYNC VENTA DETALLES:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(detalles),
+            "primer_cursor": (
+                detalles[0].sync_cursor
+                if detalles
+                else None
+            ),
+            "ultimo_cursor": (
+                detalles[-1].sync_cursor
+                if detalles
+                else None
+            )
+        }
+    )
 
     return {
         "items": [
             {
                 "id": str(d.id),
-                "empresa_uuid": d.empresa_uuid,
+
+                "empresa_uuid":
+                    d.empresa_uuid,
 
                 "venta_id":
                     str(d.venta_id)
@@ -5560,6 +5575,9 @@ async def venta_detalles_changes(
                 "version":
                     d.version,
 
+                "sync_cursor":
+                    d.sync_cursor,
+
                 "deleted_at":
                     d.deleted_at.isoformat()
                     if d.deleted_at
@@ -5577,9 +5595,10 @@ async def venta_detalles_changes(
             }
             for d in detalles
         ],
-        "has_more": len(detalles) == limit
-    }
 
+        "has_more":
+            len(detalles) == limit
+    }
 @app.get("/sync/unidades_medida/changes")
 async def unidades_medida_changes(
     empresa_uuid: str,
@@ -9647,7 +9666,7 @@ async def restore_venta_detalles_changes(
             VentaDetalle.empresa_uuid == empresa_uuid
         )
         .order_by(
-            VentaDetalle.updated_at.desc()
+            VentaDetalle.sync_cursor.desc()
         )
         .limit(limit)
         .offset(offset)
@@ -9688,6 +9707,9 @@ async def restore_venta_detalles_changes(
                 "version":
                     d.version,
 
+                "sync_cursor":
+                    d.sync_cursor,
+
                 "updated_at":
                     d.updated_at.isoformat()
                     if d.updated_at
@@ -9705,9 +9727,11 @@ async def restore_venta_detalles_changes(
             }
             for d in detalles
         ],
-        "has_more": len(detalles) == limit
-    }
 
+        "has_more":
+            len(detalles) == limit
+    }
+    
 @app.get("/restore/ventas/changes")
 async def restore_ventas_changes(
     empresa_uuid: str,
@@ -10087,7 +10111,7 @@ async def enviar_evento(
             set()
         ).discard(websocket)
 
-async def obtener_siguiente_ventas_cursor(
+async def obtener_siguiente_venta_detalle_cursor(
     db: AsyncSession,
     empresa_uuid: str
 ):
@@ -10095,7 +10119,7 @@ async def obtener_siguiente_ventas_cursor(
         text("""
             INSERT INTO empresa_sync_counters (
                 empresa_uuid,
-                ventas_cursor
+                venta_detalle_cursor
             )
             VALUES (
                 :empresa_uuid,
@@ -10111,7 +10135,7 @@ async def obtener_siguiente_ventas_cursor(
 
     resultado = await db.execute(
         text("""
-            SELECT ventas_cursor
+            SELECT venta_detalle_cursor
             FROM empresa_sync_counters
             WHERE empresa_uuid = :empresa_uuid
             FOR UPDATE
@@ -10131,7 +10155,7 @@ async def obtener_siguiente_ventas_cursor(
                 MAX(sync_cursor),
                 0
             )
-            FROM ventas
+            FROM venta_detalle
             WHERE empresa_uuid = :empresa_uuid
         """),
         {
@@ -10150,20 +10174,20 @@ async def obtener_siguiente_ventas_cursor(
     resultado_final = await db.execute(
         text("""
             UPDATE empresa_sync_counters
-            SET ventas_cursor = :ventas_cursor
+            SET venta_detalle_cursor = :venta_detalle_cursor
             WHERE empresa_uuid = :empresa_uuid
-            RETURNING ventas_cursor
+            RETURNING venta_detalle_cursor
         """),
         {
             "empresa_uuid": empresa_uuid,
-            "ventas_cursor": siguiente_cursor
+            "venta_detalle_cursor": siguiente_cursor
         }
     )
 
     return int(
         resultado_final.scalar_one()
     )
-    
+     
 async def obtener_siguiente_cajas_cursor(
     db: AsyncSession,
     empresa_uuid: str
