@@ -64,13 +64,16 @@ class License(Base):
         server_default=text("1")
     )
 
-    expires_at: Mapped[DateTime | None] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(
+    DateTime(timezone=True),
+    nullable=True
+)
 
-    created_at: Mapped[DateTime] = mapped_column(
-        DateTime,
-        nullable=False,
-        server_default=text("CURRENT_TIMESTAMP")
-    )
+    created_at: Mapped[datetime] = mapped_column(
+    DateTime(timezone=True),
+    nullable=False,
+    server_default=text("CURRENT_TIMESTAMP")
+)
 
     notes: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
@@ -395,21 +398,21 @@ class Company(Base):
     )
 
     deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime,
-        nullable=True
-    )
+    DateTime(timezone=True),
+    nullable=True
+)
 
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        nullable=False,
-        server_default=text("CURRENT_TIMESTAMP")
-    )
+    DateTime(timezone=True),
+    nullable=False,
+    server_default=text("CURRENT_TIMESTAMP")
+)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        nullable=False,
-        server_default=text("CURRENT_TIMESTAMP")
-    )
+    DateTime(timezone=True),
+    nullable=False,
+    server_default=text("CURRENT_TIMESTAMP")
+)
     
 class User(Base):
 
@@ -496,10 +499,10 @@ class User(Base):
 )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        nullable=False,
-        server_default=text("CURRENT_TIMESTAMP")
-    )
+    DateTime(timezone=True),
+    nullable=False,
+    server_default=text("CURRENT_TIMESTAMP")
+)
     
 class CajaConfig(Base):
 
@@ -543,9 +546,9 @@ class CajaConfig(Base):
     )
 
     deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime,
-        nullable=True
-    )
+    DateTime(timezone=True),
+    nullable=True
+)
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -554,10 +557,10 @@ class CajaConfig(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        nullable=False,
-        server_default=text("CURRENT_TIMESTAMP")
-    )
+    DateTime(timezone=True),
+    nullable=False,
+    server_default=text("CURRENT_TIMESTAMP")
+)
     
     sync_cursor: Mapped[int] = mapped_column(
                         BigInteger,
@@ -751,10 +754,10 @@ class CajaMovimiento(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        nullable=False,
-        server_default=text("CURRENT_TIMESTAMP")
-    )
+    DateTime(timezone=True),
+    nullable=False,
+    server_default=text("CURRENT_TIMESTAMP")
+)
 
     __table_args__ = (
         CheckConstraint(
@@ -1046,10 +1049,10 @@ class Pago(Base):
     )
 
     fecha: Mapped[datetime] = mapped_column(
-        DateTime,
-        nullable=False,
-        server_default=text("CURRENT_TIMESTAMP")
-    )
+    DateTime(timezone=True),
+    nullable=False,
+    server_default=text("CURRENT_TIMESTAMP")
+)
 
     sync_status: Mapped[str] = mapped_column(
         String(20),
@@ -2067,15 +2070,15 @@ class EmpresaDispositivo(Base):
     )
 
     fecha_solicitud: Mapped[datetime] = mapped_column(
-        DateTime,
-        nullable=False,
-        server_default=text("CURRENT_TIMESTAMP")
-    )
+    DateTime(timezone=True),
+    nullable=False,
+    server_default=text("CURRENT_TIMESTAMP")
+)
 
     fecha_aprobacion: Mapped[datetime | None] = mapped_column(
-        DateTime,
-        nullable=True
-    )
+    DateTime(timezone=True),
+    nullable=True
+)
 
 
 class ListaEspera(Base):
@@ -2119,7 +2122,7 @@ class ListaEspera(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        nullable=False,
-        server_default=text("CURRENT_TIMESTAMP")
-    )
+    DateTime(timezone=True),
+    nullable=False,
+    server_default=text("CURRENT_TIMESTAMP")
+)

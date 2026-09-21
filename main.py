@@ -402,7 +402,7 @@ async def activate(req: ActivateRequest, request: Request, db: AsyncSession = De
     logger.info("activate issued tokens")
     token = jwt.encode(
         {
-            "exp": datetime.utcnow() + timedelta(days=5)
+            "exp": datetime.now(timezone.utc) + timedelta(days=5)
         },
         JWT_SECRET,
         algorithm=JWT_ALGORITHM
@@ -2095,7 +2095,7 @@ async def sync_batch(
                         company.uso_balanza = payload.get("uso_balanza")
 
                         company.version += 1
-                        company.updated_at = datetime.utcnow()
+                        company.updated_at = datetime.now(timezone.utc)
                         
             elif item_type == "crear_usuario":
 
@@ -2225,7 +2225,7 @@ async def sync_batch(
                     usuario.updated_at = (
                         parse_datetime(payload["updated_at"])
                         if payload.get("updated_at")
-                        else datetime.utcnow()
+                        else datetime.now(timezone.utc)
                     )
 
                     usuario.version = int(
@@ -3185,7 +3185,7 @@ async def sync_batch(
                         "synced"
                     )
 
-                    movimiento.updated_at = datetime.utcnow()
+                    movimiento.updated_at = datetime.now(timezone.utc)
 
                     print(
                         "MOVIMIENTO RESUELTO:",
@@ -3231,7 +3231,7 @@ async def sync_batch(
                         "synced"
                     )
 
-                    movimiento.updated_at = datetime.utcnow()
+                    movimiento.updated_at = datetime.now(timezone.utc)
             
             elif item_type == "asignar_caja":
 
@@ -3449,7 +3449,7 @@ async def sync_batch(
 
                 if caja:
 
-                    caja.deleted_at = datetime.utcnow()
+                    caja.deleted_at = datetime.now(timezone.utc)
                     caja.sync_status = "synced"
                     caja.version += 1
                     
@@ -3873,7 +3873,7 @@ async def sync_batch(
                         rol.deleted_at = (
                             parse_datetime(payload["deleted_at"])
                             if payload.get("deleted_at")
-                            else datetime.utcnow()
+                            else datetime.now(timezone.utc)
                         )
 
                         rol.sync_status = "deleted"
@@ -3882,7 +3882,7 @@ async def sync_batch(
                         rol.updated_at = (
                             parse_datetime(payload["updated_at"])
                             if payload.get("updated_at")
-                            else datetime.utcnow()
+                            else datetime.now(timezone.utc)
                         )
 
                         eventos_ws.append({
@@ -3929,7 +3929,7 @@ async def sync_batch(
                         rol_permiso.deleted_at = (
                             parse_datetime(payload["deleted_at"])
                             if payload.get("deleted_at")
-                            else datetime.utcnow()
+                            else datetime.now(timezone.utc)
                         )
 
                         rol_permiso.sync_status = "deleted"
@@ -3938,7 +3938,7 @@ async def sync_batch(
                         rol_permiso.updated_at = (
                             parse_datetime(payload["updated_at"])
                             if payload.get("updated_at")
-                            else datetime.utcnow()
+                            else datetime.now(timezone.utc)
                         )
 
                         await db.flush()
@@ -3972,7 +3972,7 @@ async def sync_batch(
                         usuario_rol.deleted_at = (
                             parse_datetime(payload["deleted_at"])
                             if payload.get("deleted_at")
-                            else datetime.utcnow()
+                            else datetime.now(timezone.utc)
                         )
 
                         usuario_rol.sync_status = "deleted"
@@ -3981,7 +3981,7 @@ async def sync_batch(
                         usuario_rol.updated_at = (
                             parse_datetime(payload["updated_at"])
                             if payload.get("updated_at")
-                            else datetime.utcnow()
+                            else datetime.now(timezone.utc)
                         )
 
                         await db.flush()
@@ -4392,11 +4392,11 @@ async def sync_batch(
 
                 if cliente:
 
-                    cliente.deleted_at = datetime.utcnow()
+                    cliente.deleted_at = datetime.now(timezone.utc)
                     cliente.activo = False
                     cliente.sync_status = "synced"
                     cliente.version += 1
-                    cliente.updated_at = datetime.utcnow()
+                    cliente.updated_at = datetime.now(timezone.utc)
 
                     await db.flush()
                     
@@ -4520,7 +4520,7 @@ async def sync_batch(
                     suplidor.deleted_at = (
                         parse_datetime(payload.get("deleted_at"))
                         if payload.get("deleted_at")
-                        else datetime.utcnow()
+                        else datetime.now(timezone.utc)
                     )
 
                     suplidor.activo = False
@@ -4537,7 +4537,7 @@ async def sync_batch(
                     suplidor.updated_at = (
                         parse_datetime(payload.get("updated_at"))
                         if payload.get("updated_at")
-                        else datetime.utcnow()
+                        else datetime.now(timezone.utc)
                     )
 
                     await db.flush()
@@ -4787,10 +4787,12 @@ async def users_changes(
     )
 
     if since:
-
         since_dt = parser.isoparse(since)
 
-        since_dt = since_dt.replace(tzinfo=None)
+        if since_dt.tzinfo is None:
+            since_dt = since_dt.replace(tzinfo=timezone.utc)
+
+        since_dt = since_dt.astimezone(timezone.utc)
 
         query = query.where(
             User.updated_at > since_dt
@@ -4867,8 +4869,11 @@ async def cajas_config_changes(
     if since:
         since_dt = parser.isoparse(since)
 
-        since_dt = since_dt.replace(tzinfo=None)
-        
+        if since_dt.tzinfo is None:
+            since_dt = since_dt.replace(tzinfo=timezone.utc)
+
+        since_dt = since_dt.astimezone(timezone.utc)
+
         query = query.where(CajaConfig.updated_at > since_dt)
 
     q = await db.execute(query)
@@ -7932,7 +7937,7 @@ async def login_user(
             "user_id": str(user.id),
             "empresa_uuid": user.empresa_uuid,
             "usuario": user.usuario,
-            "exp": datetime.utcnow() + timedelta(days=30)
+            "exp": datetime.now(timezone.utc) + timedelta(days=30)
         },
         JWT_SECRET,
         algorithm=JWT_ALGORITHM
@@ -8191,7 +8196,7 @@ async def restaurar_empresa(
         {
             "empresa_uuid": empresa.uuid,
             "tipo": "restore",
-            "exp": datetime.utcnow() + timedelta(minutes=30)
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=30)
         },
         JWT_SECRET,
         algorithm=JWT_ALGORITHM
@@ -10251,7 +10256,7 @@ async def generate_token_tmp(body: TokenTmpRequest):
         {
             "empresa_uuid": body.empresa_uuid,
             "tipo": "create",
-            "exp": datetime.utcnow() + timedelta(minutes=30)
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=30)
         },
         JWT_SECRET,
         algorithm=JWT_ALGORITHM
