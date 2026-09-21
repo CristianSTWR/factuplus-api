@@ -1958,10 +1958,7 @@ PRIORIDAD_SYNC = {
 
 from datetime import datetime, timezone, timedelta
 
-RD = timezone(timedelta(hours=-4))
-
 def parse_datetime(value):
-
     if not value:
         return None
 
@@ -1969,7 +1966,10 @@ def parse_datetime(value):
         value.replace("Z", "+00:00")
     )
 
-    return dt.astimezone(RD)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    return dt.astimezone(timezone.utc)
 
 @app.post("/sync/batch")
 async def sync_batch(
@@ -3235,136 +3235,116 @@ async def sync_batch(
             
             elif item_type == "asignar_caja":
 
-                caja_id = UUID(payload["id"])
+                    caja_id = UUID(payload["id"])
 
-                q = await db.execute(
-                    select(Caja).where(
-                        Caja.id == caja_id,
-                        Caja.empresa_uuid == payload.get("empresa_uuid")
-                    )
-                )
-
-                exists = q.scalar_one_or_none()
-
-                if not exists:
-
-                    sync_cursor = (
-                        await obtener_siguiente_cajas_cursor(
-                            db,
-                            payload.get("empresa_uuid")
+                    q = await db.execute(
+                        select(Caja).where(
+                            Caja.id == caja_id,
+                            Caja.empresa_uuid == payload.get("empresa_uuid")
                         )
                     )
 
-                    fecha_apertura = (
-                        parse_datetime(
-                            payload["fecha_apertura"]
-                        )
-                        if payload.get("fecha_apertura")
-                        else None
-                    )
+                    exists = q.scalar_one_or_none()
 
-                    if (
-                        fecha_apertura
-                        and fecha_apertura.tzinfo is not None
-                    ):
+                    if not exists:
+
+                        sync_cursor = (
+                            await obtener_siguiente_cajas_cursor(
+                                db,
+                                payload.get("empresa_uuid")
+                            )
+                        )
+
                         fecha_apertura = (
-                            fecha_apertura.replace(
-                                tzinfo=None
+                            parse_datetime(
+                                payload["fecha_apertura"]
                             )
+                            if payload.get("fecha_apertura")
+                            else None
                         )
 
-                    updated_at = (
-                        parse_datetime(
-                            payload["updated_at"]
+                        updated_at = (
+                            parse_datetime(
+                                payload["updated_at"]
+                            )
+                            if payload.get("updated_at")
+                            else None
                         )
-                        if payload.get("updated_at")
-                        else None
-                    )
 
-                    created_at = (
-                        parse_datetime(
-                            payload["created_at"]
-                        )
-                        if payload.get("created_at")
-                        else None
-                    )
-
-                    if (
-                        created_at
-                        and created_at.tzinfo is not None
-                    ):
                         created_at = (
-                            created_at.replace(
-                                tzinfo=None
+                            parse_datetime(
+                                payload["created_at"]
                             )
+                            if payload.get("created_at")
+                            else None
                         )
 
-                    caja = Caja(
-                        id=caja_id,
+                        caja = Caja(
+                            id=caja_id,
 
-                        empresa_uuid=
-                            payload.get("empresa_uuid"),
+                            empresa_uuid=
+                                payload.get("empresa_uuid"),
 
-                        caja_config_id=
-                            UUID(payload["caja_config_id"]),
+                            caja_config_id=
+                                UUID(payload["caja_config_id"]),
 
-                        numero_sesion=
-                            int(
-                                payload.get(
-                                    "numero_sesion",
-                                    1
+                            numero_sesion=
+                                int(
+                                    payload.get(
+                                        "numero_sesion",
+                                        1
+                                    )
+                                ),
+
+                            usuario_id=
+                                UUID(payload["usuario_id"]),
+
+                            monto_inicial=Decimal(
+                                str(
+                                    payload.get(
+                                        "monto_inicial",
+                                        0
+                                    )
                                 )
                             ),
 
-                        usuario_id=
-                            UUID(payload["usuario_id"]),
+                            observacion=
+                                payload.get("observacion"),
 
-                        monto_inicial=Decimal(
-                            str(
+                            estado=
                                 payload.get(
-                                    "monto_inicial",
-                                    0
-                                )
-                            )
-                        ),
+                                    "estado",
+                                    "abierta"
+                                ),
 
-                        observacion=
-                            payload.get("observacion"),
+                            fecha_apertura=
+                                fecha_apertura,
 
-                        estado=
-                            payload.get(
-                                "estado",
-                                "abierta"
-                            ),
+                            sync_cursor=
+                                sync_cursor,
 
-                        fecha_apertura=
-                            fecha_apertura,
+                            sync_status=
+                                "synced",
 
-                        sync_cursor=
-                            sync_cursor,
+                            version=
+                                int(
+                                    payload.get(
+                                        "version",
+                                        1
+                                    )
+                                ),
 
-                        sync_status=
-                            "synced",
+                            updated_at=
+                                updated_at,
 
-                        version=
-                            int(
-                                payload.get(
-                                    "version",
-                                    1
-                                )
-                            ),
+                            created_at=
+                                created_at
+                        )
 
-                        updated_at=
-                            updated_at,
+                        db.add(caja)
 
-                        created_at=
-                            created_at
-                    )
-
-                    db.add(caja)
-
-                    await db.flush()
-        
+                        await db.flush()
+            
             elif item_type == "cerrar_caja":
 
                 caja_id = UUID(payload["id"])

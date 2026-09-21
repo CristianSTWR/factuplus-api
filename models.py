@@ -1185,9 +1185,9 @@ class Caja(Base):
     )
 
     fecha_apertura: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
-        server_default=text("CURRENT_TIMESTAMP")
+        server_default=func.now()
     )
 
     fecha_cierre: Mapped[datetime | None] = mapped_column(
@@ -1198,13 +1198,13 @@ class Caja(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        server_default=text("CURRENT_TIMESTAMP")
+        server_default=func.now()
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
-        server_default=text("CURRENT_TIMESTAMP")
+        server_default=func.now()
     )
     
     sync_cursor: Mapped[int] = mapped_column(
