@@ -5059,13 +5059,11 @@ async def cajas_changes(
 @app.get("/sync/caja_movimientos/changes")
 async def caja_movimientos_changes(
     empresa_uuid: str,
-    since: str | None = None,
+    cursor: int | None = None,
     limit: int = 5000,
-    offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
-
     token = authorization.replace(
         "Bearer ",
         ""
@@ -5086,34 +5084,51 @@ async def caja_movimientos_changes(
         CajaMovimiento.empresa_uuid == empresa_uuid
     )
 
-    if since:
-
-        since_dt = parser.isoparse(since)
-
-        if since_dt.tzinfo:
-            since_dt = since_dt.replace(
-                tzinfo=None
-            )
-
+    if cursor is not None:
         query = query.where(
-            CajaMovimiento.updated_at > since_dt
+            CajaMovimiento.sync_cursor > cursor
         )
 
     query = query.order_by(
-        CajaMovimiento.updated_at.asc()
+        CajaMovimiento.sync_cursor.asc()
     )
 
-    query = query.limit(limit).offset(offset)
+    query = query.limit(
+        limit
+    )
 
-    result = await db.execute(query)
+    result = await db.execute(
+        query
+    )
 
     movimientos = result.scalars().all()
+
+    print(
+        "SYNC CAJA MOVIMIENTOS:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(movimientos),
+            "primer_cursor": (
+                movimientos[0].sync_cursor
+                if movimientos
+                else None
+            ),
+            "ultimo_cursor": (
+                movimientos[-1].sync_cursor
+                if movimientos
+                else None
+            )
+        }
+    )
 
     return {
         "items": [
             {
                 "id": str(m.id),
-                "empresa_uuid": m.empresa_uuid,
+
+                "empresa_uuid":
+                    m.empresa_uuid,
 
                 "caja_id":
                     str(m.caja_id)
@@ -5130,12 +5145,14 @@ async def caja_movimientos_changes(
                     if m.venta_id
                     else None,
 
-                "tipo": m.tipo,
+                "tipo":
+                    m.tipo,
 
                 "monto":
                     float(m.monto or 0),
 
-                "descripcion": m.descripcion,
+                "descripcion":
+                    m.descripcion,
 
                 "solicitado_por":
                     str(m.solicitado_por)
@@ -5158,7 +5175,11 @@ async def caja_movimientos_changes(
                     if m.fecha_autorizacion
                     else None,
 
-                "sync_status": m.sync_status,
+                "sync_status":
+                    m.sync_status,
+
+                "sync_cursor":
+                    m.sync_cursor,
 
                 "updated_at":
                     m.updated_at.isoformat()
@@ -5172,9 +5193,12 @@ async def caja_movimientos_changes(
             }
             for m in movimientos
         ],
-        "has_more": len(movimientos) == limit
-    }
 
+        "has_more":
+            len(movimientos) == limit
+    }
+    
+    
 @app.get("/sync/productos/changes")
 async def productos_changes(
     empresa_uuid: str,
@@ -9453,7 +9477,7 @@ async def restore_usuario_roles_changes(
 @app.get("/restore/caja_movimientos/changes")
 async def restore_caja_movimientos_changes(
     empresa_uuid: str,
-    limit: int = 5000,
+    limit: int = 1000,
     offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
@@ -9481,7 +9505,7 @@ async def restore_caja_movimientos_changes(
             CajaMovimiento.empresa_uuid == empresa_uuid
         )
         .order_by(
-            CajaMovimiento.updated_at.asc()
+            CajaMovimiento.sync_cursor.desc()
         )
         .limit(limit)
         .offset(offset)
@@ -9547,6 +9571,9 @@ async def restore_caja_movimientos_changes(
                 "sync_status":
                     m.sync_status,
 
+                "sync_cursor":
+                    m.sync_cursor,
+
                 "updated_at":
                     m.updated_at.isoformat()
                     if m.updated_at
@@ -9559,9 +9586,11 @@ async def restore_caja_movimientos_changes(
             }
             for m in movimientos
         ],
-        "has_more": len(movimientos) == limit
+
+        "has_more":
+            len(movimientos) == limit
     }
-    
+      
 @app.get("/restore/productos/changes")
 async def restore_productos_changes(
     empresa_uuid: str,
