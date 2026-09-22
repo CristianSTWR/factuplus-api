@@ -563,10 +563,10 @@ class CajaConfig(Base):
 )
     
     sync_cursor: Mapped[int] = mapped_column(
-                        BigInteger,
-                        unique=True,
-                        nullable=False
-                    )
+        BigInteger,
+        unique=True,
+        nullable=False
+    )
     
 class HistorialStock(Base):
     __tablename__ = "historial_stock"

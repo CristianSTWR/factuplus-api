@@ -2416,16 +2416,24 @@ async def sync_batch(
                     await db.flush()
                         
             elif item_type == "crear_caja":
-
-                caja_uuid = UUID(payload["id"])
                 
-                print("RAW ITEM:", item)
-                print("PAYLOAD TYPE:", type(item.get("payload")))
+                caja_uuid = UUID(
+                    payload["id"]
+                )
+
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "La caja no contiene empresa_uuid"
+                    )
 
                 q = await db.execute(
                     select(CajaConfig).where(
                         CajaConfig.id == caja_uuid,
-                        CajaConfig.empresa_uuid == payload.get("empresa_uuid")
+                        CajaConfig.empresa_uuid == empresa_uuid
                     )
                 )
 
@@ -2433,29 +2441,93 @@ async def sync_batch(
 
                 if not exists:
 
+                    sync_cursor = (
+                        await obtener_siguiente_cajas_config_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
+
                     caja = CajaConfig(
                         id=caja_uuid,
-                        empresa_uuid=payload.get("empresa_uuid"),
-                        nombre=payload.get("nombre"),
-                        activa=payload.get("activa", True),
 
-                        sync_status=payload.get("sync_status", "synced"),
-                        version=payload.get("version", 1),
+                        empresa_uuid=empresa_uuid,
 
-                        deleted_at=payload.get("deleted_at")
+                        nombre=payload.get(
+                            "nombre"
+                        ),
+
+                        activa=payload.get(
+                            "activa",
+                            True
+                        ),
+
+                        sync_status=payload.get(
+                            "sync_status",
+                            "synced"
+                        ),
+
+                        version=int(
+                            payload.get(
+                                "version",
+                                1
+                            )
+                        ),
+
+                        sync_cursor=sync_cursor,
+
+                        deleted_at=(
+                            parse_datetime(
+                                payload["deleted_at"]
+                            )
+                            if payload.get(
+                                "deleted_at"
+                            )
+                            else None
+                        ),
+
+                        created_at=(
+                            parse_datetime(
+                                payload["created_at"]
+                            )
+                            if payload.get(
+                                "created_at"
+                            )
+                            else None
+                        ),
+
+                        updated_at=(
+                            parse_datetime(
+                                payload["updated_at"]
+                            )
+                            if payload.get(
+                                "updated_at"
+                            )
+                            else None
+                        )
                     )
 
                     db.add(caja)
-            
+        
             elif item_type == "actualizar_caja":
 
-                caja_id = UUID(payload["id"])
-                
+                caja_id = UUID(
+                    payload["id"]
+                )
+
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "La caja no contiene empresa_uuid"
+                    )
 
                 q = await db.execute(
                     select(CajaConfig).where(
                         CajaConfig.id == caja_id,
-                        CajaConfig.empresa_uuid == payload.get("empresa_uuid")
+                        CajaConfig.empresa_uuid == empresa_uuid
                     )
                 )
 
@@ -2463,35 +2535,72 @@ async def sync_batch(
 
                 if caja:
 
-                    incoming_version = payload.get("version", 1)
-
-                    if incoming_version > caja.version:
-
-                        caja.nombre = payload.get("nombre")
-                        caja.activa = payload.get("activa", True)
-
-                        caja.sync_status = payload.get(
-                            "sync_status",
-                            "synced"
+                    incoming_version = int(
+                        payload.get(
+                            "version",
+                            caja.version + 1
                         )
+                    )
 
-                        caja.deleted_at = payload.get(
-                            "deleted_at"
+                    sync_cursor = (
+                        await obtener_siguiente_cajas_config_cursor(
+                            db,
+                            empresa_uuid
                         )
+                    )
 
-                        caja.version = incoming_version
+                    caja.nombre = payload.get(
+                        "nombre"
+                    )
 
-                        caja.updated_at = (
-                            parse_datetime(
-                                payload.get("updated_at")
-                            )
-                            if payload.get("updated_at")
-                            else None
+                    caja.activa = payload.get(
+                        "activa",
+                        True
+                    )
+
+                    caja.sync_status = payload.get(
+                        "sync_status",
+                        "synced"
+                    )
+
+                    caja.version = incoming_version
+
+                    caja.sync_cursor = sync_cursor
+
+                    caja.deleted_at = (
+                        parse_datetime(
+                            payload["deleted_at"]
                         )
+                        if payload.get("deleted_at")
+                        else None
+                    )
 
-                        await db.commit()
-                        await db.refresh(caja)
-                        
+                    caja.updated_at = (
+                        parse_datetime(
+                            payload["updated_at"]
+                        )
+                        if payload.get("updated_at")
+                        else None
+                    )
+
+                    eventos_ws.append({
+                        "tipo": "caja_actualizada",
+                        "accion": "actualizado",
+                        "empresa_uuid": str(
+                            empresa_uuid
+                        ),
+                        "caja_id": str(
+                            caja_id
+                        ),
+                        "version": caja.version
+                    })
+
+                    await db.commit()
+
+                    await db.refresh(
+                        caja
+                    )
+              
             elif item_type == "crear_venta":
 
                 venta_id = UUID(
@@ -3486,19 +3595,68 @@ async def sync_batch(
         
             elif item_type == "eliminar_caja":
 
-                caja_id = UUID(payload["id"])
+                caja_id = UUID(
+                    payload["id"]
+                )
+
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "La caja no contiene empresa_uuid"
+                    )
 
                 q = await db.execute(
-                    select(CajaConfig).where(CajaConfig.id == caja_id)
+                    select(CajaConfig).where(
+                        CajaConfig.id == caja_id,
+                        CajaConfig.empresa_uuid == empresa_uuid
+                    )
                 )
 
                 caja = q.scalar_one_or_none()
 
                 if caja:
 
-                    caja.deleted_at = datetime.now(timezone.utc)
+                    sync_cursor = (
+                        await obtener_siguiente_cajas_config_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
+
+                    caja.deleted_at = datetime.now(
+                        timezone.utc
+                    )
+
                     caja.sync_status = "synced"
+
                     caja.version += 1
+
+                    caja.sync_cursor = sync_cursor
+
+                    caja.updated_at = datetime.now(
+                        timezone.utc
+                    )
+
+                    eventos_ws.append({
+                        "tipo": "caja_actualizada",
+                        "accion": "eliminado",
+                        "empresa_uuid": str(
+                            empresa_uuid
+                        ),
+                        "caja_id": str(
+                            caja_id
+                        ),
+                        "version": caja.version
+                    })
+
+                    await db.commit()
+
+                    await db.refresh(
+                        caja
+                    )
                     
             elif item_type == "crear_unidad_medida":
 
@@ -4888,11 +5046,12 @@ async def users_changes(
 @app.get("/sync/cajas_config/changes")
 async def cajas_config_changes(
     empresa_uuid: str,
-    since: str | None = None,
+    cursor: int | None = None,
+    limit: int = 5000,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
-    
+
     token = authorization.replace(
         "Bearer ",
         ""
@@ -4902,7 +5061,7 @@ async def cajas_config_changes(
         token,
         db
     )
-    
+
     if usuario_actual.empresa_uuid != empresa_uuid:
         raise HTTPException(
             status_code=403,
@@ -4913,36 +5072,89 @@ async def cajas_config_changes(
         CajaConfig.empresa_uuid == empresa_uuid
     )
 
-    if since:
-        since_dt = parser.isoparse(since)
+    if cursor is not None:
+        query = query.where(
+            CajaConfig.sync_cursor > cursor
+        )
 
-        if since_dt.tzinfo is None:
-            since_dt = since_dt.replace(tzinfo=timezone.utc)
+    query = query.order_by(
+        CajaConfig.sync_cursor.asc()
+    )
 
-        since_dt = since_dt.astimezone(timezone.utc)
+    query = query.limit(
+        limit
+    )
 
-        query = query.where(CajaConfig.updated_at > since_dt)
+    result = await db.execute(
+        query
+    )
 
-    q = await db.execute(query)
-    cajas = q.scalars().all()
+    cajas = result.scalars().all()
 
-    return [
+    print(
+        "SYNC CAJAS CONFIG:",
         {
-            "id": str(c.id),
-            "empresa_uuid": c.empresa_uuid,
-            "nombre": c.nombre,
-            "activa": c.activa,
-            "sync_status": c.sync_status,
-            "deleted_at": c.deleted_at.isoformat() if c.deleted_at else None,
-            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
-            "version": c.version,
-            "created_at":
-                c.created_at.isoformat()
-                if c.created_at else None
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(cajas),
+            "primer_cursor": (
+                cajas[0].sync_cursor
+                if cajas
+                else None
+            ),
+            "ultimo_cursor": (
+                cajas[-1].sync_cursor
+                if cajas
+                else None
+            )
         }
-        for c in cajas
-    ]
-    
+    )
+
+    return {
+        "items": [
+            {
+                "id": str(c.id),
+
+                "empresa_uuid":
+                    c.empresa_uuid,
+
+                "nombre":
+                    c.nombre,
+
+                "activa":
+                    c.activa,
+
+                "sync_status":
+                    c.sync_status,
+
+                "sync_cursor":
+                    c.sync_cursor,
+
+                "deleted_at":
+                    c.deleted_at.isoformat()
+                    if c.deleted_at
+                    else None,
+
+                "updated_at":
+                    c.updated_at.isoformat()
+                    if c.updated_at
+                    else None,
+
+                "version":
+                    c.version,
+
+                "created_at":
+                    c.created_at.isoformat()
+                    if c.created_at
+                    else None
+            }
+            for c in cajas
+        ],
+
+        "has_more":
+            len(cajas) == limit
+    }
+     
 @app.get("/sync/cajas/changes")
 async def cajas_changes(
     empresa_uuid: str,
@@ -9053,6 +9265,8 @@ async def restore_users_changes(
 @app.get("/restore/cajas_config/changes")
 async def restore_cajas_config_changes(
     empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
@@ -9073,35 +9287,69 @@ async def restore_cajas_config_changes(
         empresa_uuid
     )
 
-    q = await db.execute(
-        select(CajaConfig).where(
+    query = (
+        select(CajaConfig)
+        .where(
             CajaConfig.empresa_uuid == empresa_uuid
         )
+        .order_by(
+            CajaConfig.sync_cursor.desc()
+        )
+        .limit(limit)
+        .offset(offset)
     )
 
-    cajas = q.scalars().all()
+    result = await db.execute(query)
 
-    return [
-        {
-            "id": str(c.id),
-            "empresa_uuid": c.empresa_uuid,
-            "nombre": c.nombre,
-            "activa": c.activa,
-            "sync_status": c.sync_status,
-            "deleted_at":
-                c.deleted_at.isoformat()
-                if c.deleted_at else None,
-            "updated_at":
-                c.updated_at.isoformat()
-                if c.updated_at else None,
-            "version": c.version,
-            "created_at":
-                c.created_at.isoformat()
-                if c.created_at else None
-        }
-        for c in cajas
-    ]
+    cajas = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id":
+                    str(c.id),
+
+                "empresa_uuid":
+                    c.empresa_uuid,
+
+                "nombre":
+                    c.nombre,
+
+                "activa":
+                    c.activa,
+
+                "sync_status":
+                    c.sync_status,
+
+                "sync_cursor":
+                    c.sync_cursor,
+
+                "deleted_at":
+                    c.deleted_at.isoformat()
+                    if c.deleted_at
+                    else None,
+
+                "updated_at":
+                    c.updated_at.isoformat()
+                    if c.updated_at
+                    else None,
+
+                "version":
+                    c.version,
+
+                "created_at":
+                    c.created_at.isoformat()
+                    if c.created_at
+                    else None
+            }
+            for c in cajas
+        ],
+
+        "has_more":
+            len(cajas) == limit
+    }
     
+ 
 @app.get("/restore/roles/changes")
 async def restore_roles_changes(
     empresa_uuid: str,
@@ -10881,6 +11129,83 @@ async def obtener_siguiente_caja_movimientos_cursor(
 
     return int(
         resultado_final.scalar_one()
-    )    
+    )   
+    
+async def obtener_siguiente_cajas_config_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                cajas_config_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT cajas_config_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM cajas_config
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET cajas_config_cursor = :cajas_config_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING cajas_config_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "cajas_config_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    ) 
 
 """  """
