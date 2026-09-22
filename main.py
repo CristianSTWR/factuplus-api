@@ -3086,65 +3086,112 @@ async def sync_batch(
 
                 movimiento_id = UUID(payload["id"])
 
+                empresa_uuid = payload.get("empresa_uuid")
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "El movimiento de caja no contiene empresa_uuid"
+                    )
+
                 q = await db.execute(
                     select(CajaMovimiento).where(
                         CajaMovimiento.id == movimiento_id,
-                        CajaMovimiento.empresa_uuid == payload.get("empresa_uuid")
+                        CajaMovimiento.empresa_uuid == empresa_uuid
                     )
                 )
 
                 exists = q.scalar_one_or_none()
 
                 if not exists:
-                    
 
+                    sync_cursor = (
+                        await obtener_siguiente_caja_movimientos_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
 
                     movimiento = CajaMovimiento(
                         id=movimiento_id,
-                        empresa_uuid=payload.get("empresa_uuid"),
-                        caja_id=UUID(payload["caja_id"]),
-                        usuario_id=UUID(payload["usuario_id"])
-                        if payload.get("usuario_id")
-                        else None,
-                        venta_id=UUID(payload["venta_id"])
-                        if payload.get("venta_id")
-                        else None,
-                        tipo=payload.get("tipo"),
-                        monto=Decimal(
-                            str(payload.get("monto", 0))
+
+                        empresa_uuid=empresa_uuid,
+
+                        caja_id=UUID(
+                            payload["caja_id"]
                         ),
-                        descripcion=payload.get("descripcion"),
-                        solicitado_por=UUID(payload["solicitado_por"])
-                        if payload.get("solicitado_por")
-                        else None,
-                        autorizado_por=UUID(payload["autorizado_por"])
-                        if payload.get("autorizado_por")
-                        else None,
+
+                        usuario_id=(
+                            UUID(payload["usuario_id"])
+                            if payload.get("usuario_id")
+                            else None
+                        ),
+
+                        venta_id=(
+                            UUID(payload["venta_id"])
+                            if payload.get("venta_id")
+                            else None
+                        ),
+
+                        tipo=payload.get("tipo"),
+
+                        monto=Decimal(
+                            str(
+                                payload.get(
+                                    "monto",
+                                    0
+                                )
+                            )
+                        ),
+
+                        descripcion=payload.get(
+                            "descripcion"
+                        ),
+
+                        solicitado_por=(
+                            UUID(payload["solicitado_por"])
+                            if payload.get("solicitado_por")
+                            else None
+                        ),
+
+                        autorizado_por=(
+                            UUID(payload["autorizado_por"])
+                            if payload.get("autorizado_por")
+                            else None
+                        ),
+
                         requiere_autorizacion=bool(
                             payload.get(
                                 "requiere_autorizacion",
                                 False
                             )
                         ),
+
                         estado_autorizacion=payload.get(
                             "estado_autorizacion",
                             "no_requiere"
                         ),
-                        fecha_autorizacion=parse_datetime(
-                            payload.get("fecha_autorizacion")
-                        )
-                        if payload.get("fecha_autorizacion")
-                        else None,
+
+                        fecha_autorizacion=(
+                            parse_datetime(
+                                payload.get(
+                                    "fecha_autorizacion"
+                                )
+                            )
+                            if payload.get(
+                                "fecha_autorizacion"
+                            )
+                            else None
+                        ),
+
                         sync_status=payload.get(
                             "sync_status",
                             "synced"
-                        )
+                        ),
+
+                        sync_cursor=sync_cursor
                     )
 
-                    db.add(movimiento)
-
-                    db.add(movimiento)
-                    
+                    db.add(movimiento)     
             
                     
             elif item_type == "resolver_movimiento_caja":
@@ -10757,4 +10804,83 @@ async def obtener_siguiente_ventas_cursor(
     return int(
         resultado_final.scalar_one()
     )
-   
+
+async def obtener_siguiente_caja_movimientos_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                caja_movimientos_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT caja_movimientos_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM caja_movimientos
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET caja_movimientos_cursor = :caja_movimientos_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING caja_movimientos_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "caja_movimientos_cursor":
+                siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )    
+
+"""  """
