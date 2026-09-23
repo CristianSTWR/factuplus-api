@@ -1363,6 +1363,12 @@ class RolPermiso(Base):
         nullable=True
     )
     
+    sync_cursor: Mapped[int] = mapped_column(
+                        BigInteger,
+                        unique=True,
+                        nullable=False
+                    )
+    
 class Rol(Base):
 
     __tablename__ = "roles"

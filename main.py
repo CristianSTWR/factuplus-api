@@ -3909,6 +3909,8 @@ async def sync_batch(
                     payload["permiso_id"]
                 )
 
+                empresa_uuid = payload["empresa_uuid"]
+
                 q = await db.execute(
                     select(RolPermiso).where(
                         RolPermiso.rol_id == rol_id,
@@ -3920,10 +3922,18 @@ async def sync_batch(
 
                 if not rol_permiso:
 
+                    sync_cursor = (
+                        await obtener_siguiente_rol_permisos_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
+
                     rol_permiso = RolPermiso(
-                        empresa_uuid=payload["empresa_uuid"],
+                        empresa_uuid=empresa_uuid,
                         rol_id=rol_id,
                         permiso_id=permiso_id,
+                        sync_cursor=sync_cursor,
                         version=payload.get(
                             "version",
                             1
@@ -3958,19 +3968,29 @@ async def sync_batch(
 
                 else:
 
-                    version_payload = int(
-                        payload.get("version", 1)
-                    )
-
                     if rol_permiso.deleted_at is not None:
 
+                        sync_cursor = (
+                            await obtener_siguiente_rol_permisos_cursor(
+                                db,
+                                empresa_uuid
+                            )
+                        )
+
                         rol_permiso.deleted_at = None
+
+                        rol_permiso.sync_cursor = sync_cursor
 
                         rol_permiso.version = max(
                             int(
                                 rol_permiso.version or 0
                             ) + 1,
-                            version_payload
+                            int(
+                                payload.get(
+                                    "version",
+                                    1
+                                )
+                            )
                         )
 
                         rol_permiso.sync_status = "synced"
@@ -3982,29 +4002,7 @@ async def sync_batch(
                                 )
                             )
 
-                    else:
-
-                        if version_payload > int(
-                            rol_permiso.version or 0
-                        ):
-
-                            rol_permiso.version = (
-                                version_payload
-                            )
-
-                            rol_permiso.sync_status = (
-                                "synced"
-                            )
-
-                            if payload.get("updated_at"):
-                                rol_permiso.updated_at = (
-                                    parse_datetime(
-                                        payload["updated_at"]
-                                    )
-                                )
-
                     await db.flush()
-
                     
             elif item_type == "actualizar_rol_nivel":
 
@@ -4205,14 +4203,21 @@ async def sync_batch(
                     
             elif item_type == "eliminar_rol_permiso":
 
-                rol_id = UUID(payload["rol_id"])
-                permiso_id = UUID(payload["permiso_id"])
+                rol_id = UUID(
+                    payload["rol_id"]
+                )
+
+                permiso_id = UUID(
+                    payload["permiso_id"]
+                )
+
+                empresa_uuid = payload["empresa_uuid"]
 
                 q = await db.execute(
                     select(RolPermiso).where(
                         RolPermiso.rol_id == rol_id,
                         RolPermiso.permiso_id == permiso_id,
-                        RolPermiso.empresa_uuid == payload["empresa_uuid"]
+                        RolPermiso.empresa_uuid == empresa_uuid
                     )
                 )
 
@@ -4220,32 +4225,42 @@ async def sync_batch(
 
                 if rol_permiso:
 
-                    incoming_version = int(
+                    sync_cursor = (
+                        await obtener_siguiente_rol_permisos_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
+
+                    rol_permiso.deleted_at = (
+                        parse_datetime(
+                            payload["deleted_at"]
+                        )
+                        if payload.get("deleted_at")
+                        else datetime.now(timezone.utc)
+                    )
+
+                    rol_permiso.sync_status = "deleted"
+
+                    rol_permiso.sync_cursor = sync_cursor
+
+                    rol_permiso.version = int(
                         payload.get(
                             "version",
                             rol_permiso.version + 1
                         )
                     )
 
-                    if incoming_version >= rol_permiso.version:
-
-                        rol_permiso.deleted_at = (
-                            parse_datetime(payload["deleted_at"])
-                            if payload.get("deleted_at")
-                            else datetime.now(timezone.utc)
+                    rol_permiso.updated_at = (
+                        parse_datetime(
+                            payload["updated_at"]
                         )
+                        if payload.get("updated_at")
+                        else datetime.now(timezone.utc)
+                    )
 
-                        rol_permiso.sync_status = "deleted"
-                        rol_permiso.version = incoming_version
-
-                        rol_permiso.updated_at = (
-                            parse_datetime(payload["updated_at"])
-                            if payload.get("updated_at")
-                            else datetime.now(timezone.utc)
-                        )
-
-                        await db.flush()
-                        
+                    await db.flush()  
+                
             elif item_type == "eliminar_usuario_rol":
 
                 usuario_id = UUID(
@@ -11535,6 +11550,83 @@ async def obtener_siguiente_usuario_roles_cursor(
         {
             "empresa_uuid": empresa_uuid,
             "usuario_roles_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
+    
+async def obtener_siguiente_rol_permisos_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                rol_permisos_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT rol_permisos_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM rol_permisos
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET rol_permisos_cursor = :rol_permisos_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING rol_permisos_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "rol_permisos_cursor": siguiente_cursor
         }
     )
 
