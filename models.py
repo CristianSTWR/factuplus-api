@@ -1421,6 +1421,12 @@ class Rol(Base):
         nullable=False
     )
     
+    sync_cursor: Mapped[int] = mapped_column(
+                    BigInteger,
+                    unique=True,
+                    nullable=False
+                )
+    
 class UsuarioRol(Base):
 
     __tablename__ = "usuario_roles"

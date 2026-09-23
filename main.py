@@ -6214,11 +6214,8 @@ async def unidades_medida_changes(
 @app.get("/sync/roles/changes")
 async def roles_changes(
     empresa_uuid: str,
-    since: str | None = None,
-    rol_id: str | None = None,
-    version: int | None = None,
-    limit: int = 1000,
-    offset: int = 0,
+    cursor: int | None = None,
+    limit: int = 5000,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
@@ -6249,44 +6246,49 @@ async def roles_changes(
         Rol.empresa_uuid == empresa_uuid
     )
 
-    if rol_id:
+    if cursor is not None:
         query = query.where(
-            Rol.id == rol_id
-        )
-
-    if version is not None:
-        query = query.where(
-            Rol.version >= version
-        )
-
-    elif since:
-
-        since_dt = parser.isoparse(since)
-
-        query = query.where(
-            Rol.updated_at >= since_dt
+            Rol.sync_cursor > cursor
         )
 
     query = query.order_by(
-        Rol.updated_at.asc(),
-        Rol.id.asc()
+        Rol.sync_cursor.asc()
     )
 
-    query = query.offset(offset).limit(limit + 1)
+    query = query.limit(
+        limit
+    )
 
-    result = await db.execute(query)
+    result = await db.execute(
+        query
+    )
 
     roles = result.scalars().all()
 
-    has_more = len(roles) > limit
-
-    if has_more:
-        roles = roles[:limit]
+    print(
+        "SYNC ROLES:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(roles),
+            "primer_cursor": (
+                roles[0].sync_cursor
+                if roles
+                else None
+            ),
+            "ultimo_cursor": (
+                roles[-1].sync_cursor
+                if roles
+                else None
+            )
+        }
+    )
 
     return {
         "items": [
             {
-                "id": str(r.id),
+                "id":
+                    str(r.id),
 
                 "empresa_uuid":
                     r.empresa_uuid,
@@ -6306,6 +6308,9 @@ async def roles_changes(
                 "version":
                     r.version,
 
+                "sync_cursor":
+                    r.sync_cursor,
+
                 "updated_at":
                     r.updated_at.isoformat()
                     if r.updated_at
@@ -6324,9 +6329,10 @@ async def roles_changes(
             for r in roles
         ],
 
-        "has_more": has_more
+        "has_more":
+            len(roles) == limit
     }
-
+    
 @app.get("/sync/usuario-roles/changes")
 async def usuario_roles_changes(
     empresa_uuid: str,
@@ -9353,7 +9359,7 @@ async def restore_cajas_config_changes(
 @app.get("/restore/roles/changes")
 async def restore_roles_changes(
     empresa_uuid: str,
-    limit: int = 5000,
+    limit: int = 1000,
     offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
@@ -9377,20 +9383,27 @@ async def restore_roles_changes(
 
     query = (
         select(Rol)
-        .where(Rol.empresa_uuid == empresa_uuid)
-        .order_by(Rol.updated_at.asc())
+        .where(
+            Rol.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            Rol.sync_cursor.desc()
+        )
         .limit(limit)
         .offset(offset)
     )
 
-    result = await db.execute(query)
+    result = await db.execute(
+        query
+    )
 
     roles = result.scalars().all()
 
     return {
         "items": [
             {
-                "id": str(r.id),
+                "id":
+                    str(r.id),
 
                 "empresa_uuid":
                     r.empresa_uuid,
@@ -9406,9 +9419,12 @@ async def restore_roles_changes(
 
                 "version":
                     r.version,
-                    
+
                 "nivel":
                     r.nivel,
+
+                "sync_cursor":
+                    r.sync_cursor,
 
                 "updated_at":
                     r.updated_at.isoformat()
@@ -9427,7 +9443,9 @@ async def restore_roles_changes(
             }
             for r in roles
         ],
-        "has_more": len(roles) == limit
+
+        "has_more":
+            len(roles) == limit
     }
     
 @app.get("/restore/cajas/changes")
@@ -11207,5 +11225,83 @@ async def obtener_siguiente_cajas_config_cursor(
     return int(
         resultado_final.scalar_one()
     ) 
+    
+async def obtener_siguiente_roles_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                roles_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT roles_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM roles
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET roles_cursor = :roles_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING roles_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "roles_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
+    
 
 """  """
