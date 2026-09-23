@@ -1480,10 +1480,11 @@ class UsuarioRol(Base):
         nullable=True
     )
     
-    sync_cursor: Mapped[str] = mapped_column(
-            String(20),
-            default="synced"
-        )
+    sync_cursor: Mapped[int] = mapped_column(
+                    BigInteger,
+                    unique=True,
+                    nullable=False
+                )
 
 class Producto(Base):
 
