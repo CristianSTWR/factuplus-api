@@ -2270,9 +2270,22 @@ async def sync_batch(
                         
             elif item_type == "crear_usuario_rol":
 
-                usuario_id = UUID(payload["usuario_id"])
-                rol_id = UUID(payload["rol_id"])
-                empresa_uuid = payload["empresa_uuid"]
+                usuario_id = UUID(
+                    payload["usuario_id"]
+                )
+
+                rol_id = UUID(
+                    payload["rol_id"]
+                )
+
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "La relación usuario-rol no contiene empresa_uuid"
+                    )
 
                 q = await db.execute(
                     select(UsuarioRol).where(
@@ -2286,135 +2299,117 @@ async def sync_batch(
 
                 if not usuario_rol:
 
+                    sync_cursor = (
+                        await obtener_siguiente_usuario_roles_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
+
                     usuario_rol = UsuarioRol(
                         usuario_id=usuario_id,
                         rol_id=rol_id,
                         empresa_uuid=empresa_uuid,
-                        version=payload.get("version", 1),
+                        version=int(
+                            payload.get(
+                                "version",
+                                1
+                            )
+                        ),
+                        sync_cursor=sync_cursor,
                         sync_status="synced",
                         created_at=(
-                            parse_datetime(payload["created_at"])
+                            parse_datetime(
+                                payload["created_at"]
+                            )
                             if payload.get("created_at")
                             else None
                         ),
                         updated_at=(
-                            parse_datetime(payload["updated_at"])
+                            parse_datetime(
+                                payload["updated_at"]
+                            )
                             if payload.get("updated_at")
                             else None
                         ),
                         deleted_at=(
-                            parse_datetime(payload["deleted_at"])
+                            parse_datetime(
+                                payload["deleted_at"]
+                            )
                             if payload.get("deleted_at")
                             else None
                         )
                     )
 
-                    db.add(usuario_rol)
+                    db.add(
+                        usuario_rol
+                    )
 
                     await db.flush()
 
                     eventos_ws.append({
                         "tipo": "usuario_rol_actualizado",
                         "accion": "rol_asignado",
-                        "empresa_uuid": str(empresa_uuid),
-                        "usuario_id": str(usuario_id),
-                        "rol_id": str(rol_id),
+                        "empresa_uuid": str(
+                            empresa_uuid
+                        ),
+                        "usuario_id": str(
+                            usuario_id
+                        ),
+                        "rol_id": str(
+                            rol_id
+                        ),
                         "version": usuario_rol.version
                     })
 
                 else:
 
+                    sync_cursor = (
+                        await obtener_siguiente_usuario_roles_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
+
                     usuario_rol.deleted_at = None
 
                     usuario_rol.sync_status = "synced"
 
-                    usuario_rol.version = (
-                        payload.get("version", usuario_rol.version)
-                    )
-
-                    usuario_rol.updated_at = (
-                        parse_datetime(payload["updated_at"])
-                        if payload.get("updated_at")
-                        else None
-                    )
-
-                    await db.flush()
-
-                    eventos_ws.append({
-                        "tipo": "usuario_rol_actualizado",
-                        "accion": "rol_asignado",
-                        "empresa_uuid": str(empresa_uuid),
-                        "usuario_id": str(usuario_id),
-                        "rol_id": str(rol_id),
-                        "version": usuario_rol.version
-                    })
-                    
-            elif item_type == "eliminar_usuario_rol":
-
-                usuario_id = UUID(
-                    payload["usuario_id"]
-                )
-
-                rol_id = UUID(
-                    payload["rol_id"]
-                )
-
-                q = await db.execute(
-                    select(UsuarioRol).where(
-                        UsuarioRol.usuario_id == usuario_id,
-                        UsuarioRol.rol_id == rol_id
-                    )
-                )
-
-                usuario_rol = q.scalar_one_or_none()
-
-                if usuario_rol:
-
-                    usuario_rol.deleted_at = (
-                        parse_datetime(
-                            payload["deleted_at"]
+                    usuario_rol.version = int(
+                        payload.get(
+                            "version",
+                            usuario_rol.version + 1
                         )
-                        if payload.get("deleted_at")
-                        else None
                     )
-                    
-                    usuario_rol.sync_status = "deleted"
+
+                    usuario_rol.sync_cursor = sync_cursor
 
                     usuario_rol.updated_at = (
                         parse_datetime(
                             payload["updated_at"]
                         )
                         if payload.get("updated_at")
-                        else None
+                        else datetime.now(timezone.utc)
                     )
 
-                    usuario_rol.version = payload.get(
-                        "version",
-                        usuario_rol.version
-                    )
-
-                    usuario_rol.sync_status = "synced"
+                    await db.flush()
 
                     eventos_ws.append({
                         "tipo": "usuario_rol_actualizado",
-                        "accion": "rol_eliminado",
+                        "accion": "rol_asignado",
                         "empresa_uuid": str(
-                            payload["empresa_uuid"]
+                            empresa_uuid
                         ),
                         "usuario_id": str(
-                            payload["usuario_id"]
+                            usuario_id
                         ),
                         "rol_id": str(
-                            payload["rol_id"]
+                            rol_id
                         ),
-                        "version": payload.get(
-                            "version",
-                            usuario_rol.version
-                        )
+                        "version": usuario_rol.version
                     })
-
-                    await db.flush()
-                        
+             
+                      
             elif item_type == "crear_caja":
                 
                 caja_uuid = UUID(
@@ -4253,14 +4248,28 @@ async def sync_batch(
                         
             elif item_type == "eliminar_usuario_rol":
 
-                usuario_id = UUID(payload["usuario_id"])
-                rol_id = UUID(payload["rol_id"])
+                usuario_id = UUID(
+                    payload["usuario_id"]
+                )
+
+                rol_id = UUID(
+                    payload["rol_id"]
+                )
+
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "La relación usuario-rol no contiene empresa_uuid"
+                    )
 
                 q = await db.execute(
                     select(UsuarioRol).where(
                         UsuarioRol.usuario_id == usuario_id,
                         UsuarioRol.rol_id == rol_id,
-                        UsuarioRol.empresa_uuid == payload["empresa_uuid"]
+                        UsuarioRol.empresa_uuid == empresa_uuid
                     )
                 )
 
@@ -4268,32 +4277,41 @@ async def sync_batch(
 
                 if usuario_rol:
 
-                    incoming_version = int(
+                    sync_cursor = (
+                        await obtener_siguiente_usuario_roles_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
+
+                    usuario_rol.deleted_at = (
+                        parse_datetime(
+                            payload["deleted_at"]
+                        )
+                        if payload.get("deleted_at")
+                        else datetime.now(timezone.utc)
+                    )
+
+                    usuario_rol.sync_status = "deleted"
+
+                    usuario_rol.version = int(
                         payload.get(
                             "version",
                             usuario_rol.version + 1
                         )
                     )
 
-                    if incoming_version >= usuario_rol.version:
+                    usuario_rol.sync_cursor = sync_cursor
 
-                        usuario_rol.deleted_at = (
-                            parse_datetime(payload["deleted_at"])
-                            if payload.get("deleted_at")
-                            else datetime.now(timezone.utc)
+                    usuario_rol.updated_at = (
+                        parse_datetime(
+                            payload["updated_at"]
                         )
+                        if payload.get("updated_at")
+                        else datetime.now(timezone.utc)
+                    )
 
-                        usuario_rol.sync_status = "deleted"
-                        usuario_rol.version = incoming_version
-
-                        usuario_rol.updated_at = (
-                            parse_datetime(payload["updated_at"])
-                            if payload.get("updated_at")
-                            else datetime.now(timezone.utc)
-                        )
-
-                        await db.flush()
-               
+                    await db.flush()
                     
             elif item_type == "crear_producto":
 
@@ -7375,6 +7393,7 @@ async def register_user(
                 "accion": "crear_usuario",
                 "empresa_uuid": str(empresa_uuid),
                 "usuario_id": str(nuevo_usuario.id),
+                "sync_cursor": usuario_rol.sync_cursor
                 "version": nuevo_usuario.version
             })
 
@@ -7852,13 +7871,19 @@ async def register_user(
                     "ROL ADMINISTRADOR NO EXISTE: CREANDO"
                 )
 
+                sync_cursor = await obtener_siguiente_roles_cursor(
+                    db,
+                    empresa_uuid
+                )
+
                 rol_admin = Rol(
                     empresa_uuid=empresa_uuid,
                     nombre="Administrador",
                     descripcion="Acceso total",
                     nivel=1,
                     sync_status="synced",
-                    version=1
+                    version=1,
+                    sync_cursor=sync_cursor
                 )
 
                 db.add(
@@ -8023,14 +8048,17 @@ async def register_user(
 
             if not usuario_rol:
 
+                sync_cursor = await obtener_siguiente_usuario_roles_cursor(
+                    db,
+                    empresa_uuid
+                )
+
                 usuario_rol = UsuarioRol(
-                    usuario_id=
-                        nuevo_usuario.id,
-                    rol_id=
-                        rol.id,
-                    empresa_uuid=
-                        empresa_uuid,
+                    usuario_id=nuevo_usuario.id,
+                    rol_id=rol.id,
+                    empresa_uuid=empresa_uuid,
                     version=1,
+                    sync_cursor=sync_cursor,
                     sync_status="synced",
                     deleted_at=None
                 )
@@ -8059,15 +8087,20 @@ async def register_user(
 
             else:
 
+                sync_cursor = await obtener_siguiente_usuario_roles_cursor(
+                    db,
+                    empresa_uuid
+                )
+
                 usuario_rol.deleted_at = None
 
-                usuario_rol.sync_status = (
-                    "synced"
-                )
+                usuario_rol.sync_status = "synced"
 
                 usuario_rol.version = (
                     usuario_rol.version or 0
                 ) + 1
+
+                usuario_rol.sync_cursor = sync_cursor
 
                 usuario_rol.updated_at = (
                     datetime.now(
@@ -8077,21 +8110,6 @@ async def register_user(
 
                 await db.flush()
 
-                print(
-                    "USUARIO_ROL RESTAURADO:",
-                    {
-                        "usuario_id":
-                            str(
-                                nuevo_usuario.id
-                            ),
-                        "rol_id":
-                            str(
-                                rol.id
-                            ),
-                        "rol":
-                            rol.nombre
-                    }
-                )
 
             usuario_roles_creados.append(
                 {
@@ -8103,6 +8121,8 @@ async def register_user(
                     ),
                     "empresa_uuid":
                         empresa_uuid,
+                    "sync_cursor":
+                        usuario_rol.sync_cursor,
                     "version":
                         usuario_rol.version
                 }
@@ -8133,14 +8153,17 @@ async def register_user(
             .all()
         )
 
-        for usuario_rol_actual in (
-            roles_usuario_actuales
-        ):
+        for usuario_rol_actual in roles_usuario_actuales:
 
             if (
                 usuario_rol_actual.rol_id
                 not in roles_ids_set
             ):
+
+                sync_cursor = await obtener_siguiente_usuario_roles_cursor(
+                    db,
+                    empresa_uuid
+                )
 
                 usuario_rol_actual.deleted_at = (
                     datetime.now(
@@ -8149,12 +8172,16 @@ async def register_user(
                 )
 
                 usuario_rol_actual.sync_status = (
-                    "synced"
+                    "deleted"
                 )
 
                 usuario_rol_actual.version = (
                     usuario_rol_actual.version or 0
                 ) + 1
+
+                usuario_rol_actual.sync_cursor = (
+                    sync_cursor
+                )
 
                 usuario_rol_actual.updated_at = (
                     datetime.now(
@@ -8163,7 +8190,7 @@ async def register_user(
                 )
 
                 await db.flush()
-
+        
         await db.commit()
 
         eventos_ws = []
@@ -8648,6 +8675,7 @@ async def restaurar_empresa(
                 "descripcion": r.descripcion,
                 "sync_status": r.sync_status,
                 "version": r.version,
+                "sync_cursor": r.sync_cursor,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
                 "updated_at": r.updated_at.isoformat() if r.updated_at else None,
                 "deleted_at": r.deleted_at.isoformat() if r.deleted_at else None
@@ -8674,6 +8702,7 @@ async def restaurar_empresa(
                 "rol_id": str(ur.rol_id),
                 "sync_status": ur.sync_status,
                 "version": ur.version,
+                "sync_cursor": ur.sync_cursor,
                 "created_at": ur.created_at.isoformat() if ur.created_at else None,
                 "updated_at": ur.updated_at.isoformat() if ur.updated_at else None,
                 "deleted_at": ur.deleted_at.isoformat() if ur.deleted_at else None
