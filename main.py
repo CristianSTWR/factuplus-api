@@ -4136,12 +4136,23 @@ async def sync_batch(
                     
             elif item_type == "eliminar_rol":
 
-                rol_id = UUID(payload["id"])
+                rol_id = UUID(
+                    payload["id"]
+                )
+
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "El rol no contiene empresa_uuid"
+                    )
 
                 q = await db.execute(
                     select(Rol).where(
                         Rol.id == rol_id,
-                        Rol.empresa_uuid == payload["empresa_uuid"]
+                        Rol.empresa_uuid == empresa_uuid
                     )
                 )
 
@@ -4149,44 +4160,53 @@ async def sync_batch(
 
                 if rol:
 
-                    incoming_version = int(
+                    sync_cursor = (
+                        await obtener_siguiente_roles_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
+
+                    rol.deleted_at = (
+                        parse_datetime(
+                            payload["deleted_at"]
+                        )
+                        if payload.get("deleted_at")
+                        else datetime.now(timezone.utc)
+                    )
+
+                    rol.sync_status = "deleted"
+
+                    rol.version = int(
                         payload.get(
                             "version",
                             rol.version + 1
                         )
                     )
 
-                    if incoming_version >= rol.version:
+                    rol.sync_cursor = sync_cursor
 
-                        rol.deleted_at = (
-                            parse_datetime(payload["deleted_at"])
-                            if payload.get("deleted_at")
-                            else datetime.now(timezone.utc)
+                    rol.updated_at = (
+                        parse_datetime(
+                            payload["updated_at"]
                         )
+                        if payload.get("updated_at")
+                        else datetime.now(timezone.utc)
+                    )
 
-                        rol.sync_status = "deleted"
-                        rol.version = incoming_version
+                    eventos_ws.append({
+                        "tipo": "rol_actualizado",
+                        "accion": "eliminar_rol",
+                        "empresa_uuid": str(
+                            empresa_uuid
+                        ),
+                        "rol_id": str(
+                            rol_id
+                        ),
+                        "version": rol.version
+                    })
 
-                        rol.updated_at = (
-                            parse_datetime(payload["updated_at"])
-                            if payload.get("updated_at")
-                            else datetime.now(timezone.utc)
-                        )
-
-                        eventos_ws.append({
-                            "tipo": "rol_actualizado",
-                            "accion": "eliminar_rol",
-                            "empresa_uuid": str(
-                                payload["empresa_uuid"]
-                            ),
-                            "rol_id": str(
-                                payload["id"]
-                            ),
-                            "version": incoming_version
-                        })
-
-                        await db.flush()
-
+                    await db.flush()
                     
             elif item_type == "eliminar_rol_permiso":
 
