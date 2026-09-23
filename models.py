@@ -1479,6 +1479,11 @@ class UsuarioRol(Base):
         DateTime(timezone=True),
         nullable=True
     )
+    
+    sync_cursor: Mapped[str] = mapped_column(
+            String(20),
+            default="synced"
+        )
 
 class Producto(Base):
 

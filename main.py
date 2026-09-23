@@ -6436,12 +6436,12 @@ async def roles_changes(
             len(roles) == limit
     }
     
+
 @app.get("/sync/usuario-roles/changes")
 async def usuario_roles_changes(
     empresa_uuid: str,
-    since: str | None = None,
+    cursor: int | None = None,
     limit: int = 5000,
-    offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
@@ -6466,28 +6466,44 @@ async def usuario_roles_changes(
         UsuarioRol.empresa_uuid == empresa_uuid
     )
 
-    if since:
-
-        since_dt = parser.isoparse(since)
-
-        if since_dt.tzinfo:
-            since_dt = since_dt.replace(
-                tzinfo=None
-            )
+    if cursor is not None:
 
         query = query.where(
-            UsuarioRol.updated_at > since_dt
+            UsuarioRol.sync_cursor > cursor
         )
 
     query = query.order_by(
-        UsuarioRol.updated_at.asc()
+        UsuarioRol.sync_cursor.asc()
     )
 
-    query = query.limit(limit).offset(offset)
+    query = query.limit(
+        limit
+    )
 
-    result = await db.execute(query)
+    result = await db.execute(
+        query
+    )
 
     usuario_roles = result.scalars().all()
+
+    print(
+        "SYNC USUARIO ROLES:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(usuario_roles),
+            "primer_cursor": (
+                usuario_roles[0].sync_cursor
+                if usuario_roles
+                else None
+            ),
+            "ultimo_cursor": (
+                usuario_roles[-1].sync_cursor
+                if usuario_roles
+                else None
+            )
+        }
+    )
 
     return {
         "items": [
@@ -6507,6 +6523,9 @@ async def usuario_roles_changes(
                 "version":
                     ur.version,
 
+                "sync_cursor":
+                    ur.sync_cursor,
+
                 "updated_at":
                     ur.updated_at.isoformat()
                     if ur.updated_at
@@ -6524,7 +6543,9 @@ async def usuario_roles_changes(
             }
             for ur in usuario_roles
         ],
-        "has_more": len(usuario_roles) == limit
+
+        "has_more":
+            len(usuario_roles) == limit
     }
 
 @app.get("/sync/rol-permisos/changes")
@@ -9811,10 +9832,11 @@ async def restore_rol_permisos_changes(
         "has_more": len(rol_permisos) == limit
     }
     
+
 @app.get("/restore/usuario-roles/changes")
 async def restore_usuario_roles_changes(
     empresa_uuid: str,
-    limit: int = 5000,
+    limit: int = 1000,
     offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
@@ -9842,13 +9864,15 @@ async def restore_usuario_roles_changes(
             UsuarioRol.empresa_uuid == empresa_uuid
         )
         .order_by(
-            UsuarioRol.updated_at.asc()
+            UsuarioRol.sync_cursor.desc()
         )
         .limit(limit)
         .offset(offset)
     )
 
-    result = await db.execute(query)
+    result = await db.execute(
+        query
+    )
 
     usuario_roles = result.scalars().all()
 
@@ -9870,6 +9894,9 @@ async def restore_usuario_roles_changes(
                 "version":
                     ur.version,
 
+                "sync_cursor":
+                    ur.sync_cursor,
+
                 "updated_at":
                     ur.updated_at.isoformat()
                     if ur.updated_at
@@ -9887,9 +9914,12 @@ async def restore_usuario_roles_changes(
             }
             for ur in usuario_roles
         ],
-        "has_more": len(usuario_roles) == limit
+
+        "has_more":
+            len(usuario_roles) == limit
     }
     
+   
 @app.get("/restore/caja_movimientos/changes")
 async def restore_caja_movimientos_changes(
     empresa_uuid: str,
@@ -11399,6 +11429,83 @@ async def obtener_siguiente_roles_cursor(
         {
             "empresa_uuid": empresa_uuid,
             "roles_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
+
+async def obtener_siguiente_usuario_roles_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                usuario_roles_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT usuario_roles_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM usuario_roles
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET usuario_roles_cursor = :usuario_roles_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING usuario_roles_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "usuario_roles_cursor": siguiente_cursor
         }
     )
 
