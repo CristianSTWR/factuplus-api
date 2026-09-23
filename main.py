@@ -6584,9 +6584,8 @@ async def usuario_roles_changes(
 @app.get("/sync/rol-permisos/changes")
 async def rol_permisos_changes(
     empresa_uuid: str,
-    since: str | None = None,
+    cursor: int | None = None,
     limit: int = 5000,
-    offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
@@ -6611,28 +6610,43 @@ async def rol_permisos_changes(
         RolPermiso.empresa_uuid == empresa_uuid
     )
 
-    if since:
-
-        since_dt = parser.isoparse(since)
-
-        if since_dt.tzinfo:
-            since_dt = since_dt.replace(
-                tzinfo=None
-            )
-
+    if cursor is not None:
         query = query.where(
-            RolPermiso.updated_at > since_dt
+            RolPermiso.sync_cursor > cursor
         )
 
     query = query.order_by(
-        RolPermiso.updated_at.asc()
+        RolPermiso.sync_cursor.asc()
     )
 
-    query = query.limit(limit).offset(offset)
+    query = query.limit(
+        limit
+    )
 
-    result = await db.execute(query)
+    result = await db.execute(
+        query
+    )
 
     rol_permisos = result.scalars().all()
+
+    print(
+        "SYNC ROL_PERMISOS:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(rol_permisos),
+            "primer_cursor": (
+                rol_permisos[0].sync_cursor
+                if rol_permisos
+                else None
+            ),
+            "ultimo_cursor": (
+                rol_permisos[-1].sync_cursor
+                if rol_permisos
+                else None
+            )
+        }
+    )
 
     return {
         "items": [
@@ -6652,6 +6666,9 @@ async def rol_permisos_changes(
                 "version":
                     rp.version,
 
+                "sync_cursor":
+                    rp.sync_cursor,
+
                 "updated_at":
                     rp.updated_at.isoformat()
                     if rp.updated_at
@@ -6669,9 +6686,11 @@ async def rol_permisos_changes(
             }
             for rp in rol_permisos
         ],
-        "has_more": len(rol_permisos) == limit
-    }
 
+        "has_more":
+            len(rol_permisos) == limit
+    }
+    
 @app.get("/sync/metodos-pago/changes")
 async def metodos_pago_changes(
     empresa_uuid: str,
@@ -9828,7 +9847,7 @@ async def restore_rol_permisos_changes(
             RolPermiso.empresa_uuid == empresa_uuid
         )
         .order_by(
-            RolPermiso.updated_at.asc()
+            RolPermiso.sync_cursor.asc()
         )
         .limit(limit)
         .offset(offset)
@@ -9837,6 +9856,25 @@ async def restore_rol_permisos_changes(
     result = await db.execute(query)
 
     rol_permisos = result.scalars().all()
+
+    print(
+        "RESTORE ROL_PERMISOS:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "offset": offset,
+            "cantidad": len(rol_permisos),
+            "primer_cursor": (
+                rol_permisos[0].sync_cursor
+                if rol_permisos
+                else None
+            ),
+            "ultimo_cursor": (
+                rol_permisos[-1].sync_cursor
+                if rol_permisos
+                else None
+            )
+        }
+    )
 
     return {
         "items": [
@@ -9856,6 +9894,9 @@ async def restore_rol_permisos_changes(
                 "version":
                     rp.version,
 
+                "sync_cursor":
+                    rp.sync_cursor,
+
                 "updated_at":
                     rp.updated_at.isoformat()
                     if rp.updated_at
@@ -9873,10 +9914,11 @@ async def restore_rol_permisos_changes(
             }
             for rp in rol_permisos
         ],
-        "has_more": len(rol_permisos) == limit
-    }
-    
 
+        "has_more":
+            len(rol_permisos) == limit
+    }
+  
 @app.get("/restore/usuario-roles/changes")
 async def restore_usuario_roles_changes(
     empresa_uuid: str,
