@@ -2184,13 +2184,6 @@ class Devolucion(Base):
         server_default=text("'synced'")
     )
 
-    version: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=1,
-        server_default=text("1")
-    )
-
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True

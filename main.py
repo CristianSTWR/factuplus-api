@@ -8423,9 +8423,6 @@ async def devoluciones_changes(
                 "sync_status":
                     d.sync_status,
 
-                "version":
-                    d.version,
-
                 "sync_cursor":
                     d.sync_cursor,
 
@@ -12824,9 +12821,6 @@ async def restore_devoluciones_changes(
 
                 "sync_status":
                     d.sync_status,
-
-                "version":
-                    d.version,
 
                 "sync_cursor":
                     d.sync_cursor,
