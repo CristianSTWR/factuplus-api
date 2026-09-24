@@ -7076,6 +7076,7 @@ async def suplidores_changes(
                 if suplidor.deleted_at
                 else None,
             "sync_status": suplidor.sync_status,
+            "sync_cursor": suplidor.sync_cursor,
             "version": suplidor.version
         }
         for suplidor in suplidores
