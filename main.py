@@ -5761,13 +5761,6 @@ async def sync_batch(
                             "synced"
                         ),
 
-                        version=int(
-                            payload.get(
-                                "version",
-                                1
-                            )
-                        ),
-
                         deleted_at=(
                             parse_datetime(
                                 payload["deleted_at"]
@@ -14259,6 +14252,83 @@ async def obtener_siguiente_devoluciones_cursor(
         {
             "empresa_uuid": empresa_uuid,
             "devoluciones_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
+    
+async def obtener_siguiente_devolucion_detalle_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                devolucion_detalle_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT devolucion_detalle_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM devolucion_detalle
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET devolucion_detalle_cursor = :devolucion_detalle_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING devolucion_detalle_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "devolucion_detalle_cursor": siguiente_cursor
         }
     )
 
