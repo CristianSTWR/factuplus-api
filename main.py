@@ -6734,13 +6734,11 @@ async def rol_permisos_changes(
 @app.get("/sync/metodos-pago/changes")
 async def metodos_pago_changes(
     empresa_uuid: str,
-    since: str | None = None,
+    cursor: int | None = None,
     limit: int = 5000,
-    offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
-
     token = authorization.replace(
         "Bearer ",
         ""
@@ -6761,28 +6759,43 @@ async def metodos_pago_changes(
         MetodoPago.empresa_uuid == empresa_uuid
     )
 
-    if since:
-
-        since_dt = parser.isoparse(since)
-
-        if since_dt.tzinfo:
-            since_dt = since_dt.replace(
-                tzinfo=None
-            )
-
+    if cursor is not None:
         query = query.where(
-            MetodoPago.updated_at > since_dt
+            MetodoPago.sync_cursor > cursor
         )
 
     query = query.order_by(
-        MetodoPago.updated_at.asc()
+        MetodoPago.sync_cursor.asc()
     )
 
-    query = query.limit(limit).offset(offset)
+    query = query.limit(
+        limit
+    )
 
-    result = await db.execute(query)
+    result = await db.execute(
+        query
+    )
 
     metodos_pago = result.scalars().all()
+
+    print(
+        "SYNC METODOS DE PAGO:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(metodos_pago),
+            "primer_cursor": (
+                metodos_pago[0].sync_cursor
+                if metodos_pago
+                else None
+            ),
+            "ultimo_cursor": (
+                metodos_pago[-1].sync_cursor
+                if metodos_pago
+                else None
+            )
+        }
+    )
 
     return {
         "items": [
@@ -6812,12 +6825,18 @@ async def metodos_pago_changes(
                     mp.sync_status,
 
                 "version":
-                    mp.version
+                    mp.version,
+
+                "sync_cursor":
+                    mp.sync_cursor
             }
             for mp in metodos_pago
         ],
-        "has_more": len(metodos_pago) == limit
-    }  
+
+        "has_more":
+            len(metodos_pago) == limit
+    }
+       
 @app.get("/sync/clientes/changes")
 async def clientes_changes(
     authorization: str = Header(None),
@@ -10822,7 +10841,7 @@ async def restore_metodos_pago_changes(
             MetodoPago.empresa_uuid == empresa_uuid
         )
         .order_by(
-            MetodoPago.updated_at.desc()
+            MetodoPago.sync_cursor.desc()
         )
         .limit(limit)
         .offset(offset)
@@ -10835,7 +10854,8 @@ async def restore_metodos_pago_changes(
     return {
         "items": [
             {
-                "id": str(mp.id),
+                "id":
+                    str(mp.id),
 
                 "empresa_uuid":
                     mp.empresa_uuid,
@@ -10860,13 +10880,17 @@ async def restore_metodos_pago_changes(
                     mp.sync_status,
 
                 "version":
-                    mp.version
+                    mp.version,
+
+                "sync_cursor":
+                    mp.sync_cursor
             }
             for mp in metodos_pago
         ],
-        "has_more": len(metodos_pago) == limit
+        "has_more":
+            len(metodos_pago) == limit
     }
-    
+      
 from pydantic import BaseModel
 
 class TokenTmpRequest(BaseModel):
@@ -11809,6 +11833,83 @@ async def obtener_siguiente_usuarios_cursor(
         {
             "empresa_uuid": empresa_uuid,
             "usuarios_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
+    
+async def obtener_siguiente_metodos_pago_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                metodos_pago_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT metodos_pago_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM metodos_pago
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET metodos_pago_cursor = :metodos_pago_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING metodos_pago_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "metodos_pago_cursor": siguiente_cursor
         }
     )
 

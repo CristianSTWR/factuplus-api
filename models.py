@@ -1681,6 +1681,12 @@ class MetodoPago(Base):
         nullable=True
     )
     
+    sync_cursor: Mapped[int] = mapped_column(
+        BigInteger,
+        unique=True,
+        nullable=False
+    )
+    
 class Cliente(Base):
 
     __tablename__ = "clientes"
