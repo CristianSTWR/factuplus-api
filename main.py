@@ -2034,6 +2034,7 @@ async def sync_batch(
                 "crear_movimiento_caja": 12,
                 "cerrar_caja": 13,
                 "producto_sumarstock": 14,
+                "producto_reducirstock": 15,
             }.get(x["type"], 999)
         )
                 
@@ -3408,7 +3409,215 @@ async def sync_batch(
                         "sync_cursor": sync_cursor
                     }
                 )
-                
+            
+            elif item_type == "producto_reducirstock":
+                producto_id = UUID(payload["producto_id"])
+                empresa_uuid = str(payload["empresa_uuid"])
+
+                cantidad = Decimal(
+                    str(payload.get("cantidad", 0))
+                )
+
+                if cantidad >= 0:
+                    raise ValueError(
+                        "La cantidad para reducir stock debe ser menor que 0"
+                    )
+
+                resultado_producto = await db.execute(
+                    select(Producto)
+                    .where(
+                        Producto.id == producto_id,
+                        Producto.empresa_uuid == empresa_uuid
+                    )
+                    .with_for_update()
+                )
+
+                producto = resultado_producto.scalar_one_or_none()
+
+                if not producto:
+                    raise ValueError(
+                        f"No existe el producto {producto_id}"
+                    )
+
+                movimiento_id = UUID(payload["movimiento_id"])
+
+                movimiento_existente = await db.execute(
+                    select(HistorialStock).where(
+                        HistorialStock.movimiento_id == movimiento_id
+                    )
+                )
+
+                if movimiento_existente.scalar_one_or_none():
+                    print(
+                        "PRODUCTO REDUCIR STOCK YA PROCESADO:",
+                        movimiento_id
+                    )
+                    continue
+
+                resultado_cursor = await db.execute(
+                    text("""
+                        INSERT INTO empresa_sync_counters (
+                            empresa_uuid,
+                            historial_stock_cursor
+                        )
+                        VALUES (
+                            :empresa_uuid,
+                            1
+                        )
+                        ON CONFLICT (empresa_uuid)
+                        DO UPDATE SET
+                            historial_stock_cursor =
+                                empresa_sync_counters.historial_stock_cursor + 1
+                        RETURNING historial_stock_cursor
+                    """),
+                    {
+                        "empresa_uuid": empresa_uuid
+                    }
+                )
+
+                sync_cursor = resultado_cursor.scalar_one()
+
+                stock_actual = Decimal(
+                    str(producto.stock or 0)
+                )
+
+                cantidad_reducir = abs(cantidad)
+
+                if stock_actual < cantidad_reducir:
+                    raise ValueError(
+                        f"Stock insuficiente. "
+                        f"Stock actual: {stock_actual}, "
+                        f"cantidad a reducir: {cantidad_reducir}"
+                    )
+
+                nuevo_stock = stock_actual + cantidad
+
+                producto.stock = nuevo_stock
+
+                historial = HistorialStock(
+                    movimiento_id=movimiento_id,
+                    operacion_id=(
+                        UUID(payload["operacion_id"])
+                        if payload.get("operacion_id")
+                        else None
+                    ),
+                    empresa_uuid=empresa_uuid,
+                    producto_id=producto_id,
+                    tipo_movimiento="salida",
+                    cantidad=cantidad,
+                    stock_antes=stock_actual,
+                    stock_despues=nuevo_stock,
+                    referencia=payload.get(
+                        "referencia",
+                        "Salida de inventario"
+                    ),
+                    usuario_id=(
+                        UUID(payload["usuario_id"])
+                        if payload.get("usuario_id")
+                        else None
+                    ),
+                    sync_cursor=sync_cursor
+                )
+
+                db.add(historial)
+
+                await db.flush()
+
+                eventos_ws.append({
+                    "tipo": "producto_actualizado",
+                    "accion": "stock_actualizado",
+
+                    "movimiento_id": str(movimiento_id),
+
+                    "operacion_id": (
+                        str(payload["operacion_id"])
+                        if payload.get("operacion_id")
+                        else None
+                    ),
+
+                    "empresa_uuid": str(producto.empresa_uuid),
+                    "producto_id": str(producto.id),
+
+                    "cantidad": float(cantidad),
+                    "tipo_movimiento": "salida",
+
+                    "stock_antes": float(stock_actual),
+                    "stock_despues": float(nuevo_stock),
+
+                    "referencia": payload.get(
+                        "referencia",
+                        "Salida de inventario"
+                    ),
+
+                    "usuario_id": (
+                        str(UUID(payload["usuario_id"]))
+                        if payload.get("usuario_id")
+                        else None
+                    ),
+
+                    "codigo_barras": producto.codigo_barras,
+                    "codigo_balanza": producto.codigo_balanza,
+                    "codigo_interno": producto.codigo_interno,
+
+                    "es_balanza": producto.es_balanza,
+
+                    "nombre": producto.nombre,
+
+                    "precio": float(producto.precio or 0),
+                    "costo": float(producto.costo or 0),
+
+                    "stock": float(nuevo_stock),
+                    "stock_minimo": float(
+                        producto.stock_minimo or 0
+                    ),
+
+                    "itbis": float(producto.itbis or 0),
+
+                    "unidad_id": (
+                        str(producto.unidad_id)
+                        if producto.unidad_id
+                        else None
+                    ),
+
+                    "activo": producto.activo,
+
+                    "sync_status": producto.sync_status,
+
+                    "deleted_at": (
+                        producto.deleted_at.isoformat()
+                        if producto.deleted_at
+                        else None
+                    ),
+
+                    "version": producto.version,
+
+                    "updated_at": (
+                        producto.updated_at.isoformat()
+                        if producto.updated_at
+                        else None
+                    ),
+
+                    "created_at": (
+                        producto.created_at.isoformat()
+                        if producto.created_at
+                        else None
+                    ),
+
+                    "sync_cursor": sync_cursor
+                })
+
+                print(
+                    "PRODUCTO REDUCIR STOCK SINCRONIZADO:",
+                    {
+                        "producto_id": str(producto_id),
+                        "cantidad": float(cantidad),
+                        "stock_antes": float(stock_actual),
+                        "stock_despues": float(nuevo_stock),
+                        "movimiento_id": str(movimiento_id),
+                        "sync_cursor": sync_cursor
+                    }
+                )
+            
             elif item_type == "crear_movimiento_caja":
 
                 movimiento_id = UUID(payload["id"])
