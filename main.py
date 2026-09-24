@@ -7858,15 +7858,18 @@ async def register_user(
                 usuario_existente.version or 0
             ) + 1
 
-            usuario_existente.updated_at = (
-                datetime.now(
-                    timezone.utc
-                )
+            usuario_existente.updated_at = datetime.now(
+                timezone.utc
             )
 
-            nuevo_usuario = (
-                usuario_existente
+            sync_cursor = await obtener_siguiente_usuarios_cursor(
+                db,
+                empresa_uuid
             )
+
+            usuario_existente.sync_cursor = sync_cursor
+
+            nuevo_usuario = usuario_existente
 
         else:
 
@@ -7900,6 +7903,11 @@ async def register_user(
                 )
             )
 
+            sync_cursor = await obtener_siguiente_usuarios_cursor(
+                db,
+                empresa_uuid
+            )
+
             nuevo_usuario = User(
                 empresa_uuid=empresa_uuid,
                 nombre=nombre,
@@ -7909,12 +7917,11 @@ async def register_user(
                 activo=activo,
                 permitir_nube=permitir_nube,
                 sync_status="synced",
-                version=1
+                version=1,
+                sync_cursor=sync_cursor
             )
 
-            db.add(
-                nuevo_usuario
-            )
+            db.add(nuevo_usuario)
 
         await db.flush()
 
@@ -8340,6 +8347,9 @@ async def register_user(
 
             "version":
                 nuevo_usuario.version,
+                
+            "sync_cursor":
+                nuevo_usuario.sync_cursor,
 
             "created_at": (
                 nuevo_usuario.created_at.isoformat()
@@ -11722,6 +11732,83 @@ async def obtener_siguiente_rol_permisos_cursor(
         {
             "empresa_uuid": empresa_uuid,
             "rol_permisos_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
+    
+async def obtener_siguiente_usuarios_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                usuarios_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT usuarios_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM usuarios
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET usuarios_cursor = :usuarios_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING usuarios_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "usuarios_cursor": siguiente_cursor
         }
     )
 
