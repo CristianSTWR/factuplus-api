@@ -4787,12 +4787,23 @@ async def sync_batch(
                     
             elif item_type == "crear_suplidor":
 
-                suplidor_id = UUID(payload["id"])
+                suplidor_id = UUID(
+                    payload["id"]
+                )
+
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "El suplidor no contiene empresa_uuid"
+                    )
 
                 q = await db.execute(
                     select(Suplidor).where(
                         Suplidor.id == suplidor_id,
-                        Suplidor.empresa_uuid == payload["empresa_uuid"]
+                        Suplidor.empresa_uuid == empresa_uuid
                     )
                 )
 
@@ -4800,40 +4811,66 @@ async def sync_batch(
 
                 if not suplidor:
 
+                    sync_cursor = (
+                        await obtener_siguiente_suplidores_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
+
                     suplidor = Suplidor(
                         id=suplidor_id,
-                        empresa_uuid=payload.get("empresa_uuid"),
-                        numero_suplidor=int(payload["numero_suplidor"]),
+                        empresa_uuid=empresa_uuid,
+                        numero_suplidor=int(
+                            payload["numero_suplidor"]
+                        ),
                         nombre=payload["nombre"],
                         rnc=payload.get("rnc"),
                         contacto=payload.get("contacto"),
                         correo=payload.get("correo"),
                         telefono=payload.get("telefono"),
                         direccion=payload.get("direccion"),
-                        activo=payload.get("activo", True),
+                        activo=payload.get(
+                            "activo",
+                            True
+                        ),
                         created_at=(
-                            parse_datetime(payload["created_at"])
+                            parse_datetime(
+                                payload["created_at"]
+                            )
                             if payload.get("created_at")
                             else None
                         ),
                         updated_at=(
-                            parse_datetime(payload["updated_at"])
+                            parse_datetime(
+                                payload["updated_at"]
+                            )
                             if payload.get("updated_at")
                             else None
                         ),
                         deleted_at=(
-                            parse_datetime(payload["deleted_at"])
+                            parse_datetime(
+                                payload["deleted_at"]
+                            )
                             if payload.get("deleted_at")
                             else None
                         ),
                         sync_status="synced",
-                        version=int(payload.get("version", 1))
+                        version=int(
+                            payload.get(
+                                "version",
+                                1
+                            )
+                        ),
+                        sync_cursor=sync_cursor
                     )
 
-                    db.add(suplidor)
+                    db.add(
+                        suplidor
+                    )
 
                     await db.flush()
-                    
+              
             elif item_type == "actualizar_suplidor":
 
                 suplidor_id = payload["id"]
@@ -10934,6 +10971,112 @@ async def restore_metodos_pago_changes(
         "has_more":
             len(metodos_pago) == limit
     }
+    
+@app.get("/restore/suplidores/changes")
+async def restore_suplidores_changes(
+    empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(Suplidor)
+        .where(
+            Suplidor.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            Suplidor.sync_cursor.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(
+        query
+    )
+
+    suplidores = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(s.id),
+
+                "empresa_uuid":
+                    s.empresa_uuid,
+
+                "numero_suplidor":
+                    s.numero_suplidor,
+
+                "nombre":
+                    s.nombre,
+
+                "rnc":
+                    s.rnc,
+
+                "contacto":
+                    s.contacto,
+
+                "correo":
+                    s.correo,
+
+                "telefono":
+                    s.telefono,
+
+                "direccion":
+                    s.direccion,
+
+                "activo":
+                    s.activo,
+
+                "created_at":
+                    s.created_at.isoformat()
+                    if s.created_at
+                    else None,
+
+                "updated_at":
+                    s.updated_at.isoformat()
+                    if s.updated_at
+                    else None,
+
+                "deleted_at":
+                    s.deleted_at.isoformat()
+                    if s.deleted_at
+                    else None,
+
+                "sync_status":
+                    s.sync_status,
+
+                "version":
+                    s.version,
+
+                "sync_cursor":
+                    s.sync_cursor
+            }
+            for s in suplidores
+        ],
+
+        "has_more":
+            len(suplidores) == limit
+    }
       
 from pydantic import BaseModel
 
@@ -11961,5 +12104,81 @@ async def obtener_siguiente_metodos_pago_cursor(
         resultado_final.scalar_one()
     )
     
+async def obtener_siguiente_suplidores_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                suplidores_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT suplidores_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM suplidores
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET suplidores_cursor = :suplidores_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING suplidores_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "suplidores_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
 
 """  """

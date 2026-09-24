@@ -1882,6 +1882,12 @@ class Suplidor(Base):
         default="synced",
         server_default=text("'synced'")
     )
+    
+    sync_cursor: Mapped[int] = mapped_column(
+        BigInteger,
+        unique=True,
+        nullable=False
+    )
 
     version: Mapped[int] = mapped_column(
         Integer,
