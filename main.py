@@ -2200,49 +2200,71 @@ async def sync_batch(
                         ) + 1
             
             elif item_type == "eliminar_usuario":
-                usuario_id = UUID(payload["id"])
+                usuario_id = UUID(
+                    payload["id"]
+                )
+
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "El usuario no contiene empresa_uuid"
+                    )
 
                 q = await db.execute(
                     select(User).where(
                         User.id == usuario_id,
-                        User.empresa_uuid == payload["empresa_uuid"]
+                        User.empresa_uuid == empresa_uuid
                     )
                 )
 
                 usuario = q.scalar_one_or_none()
 
                 if usuario:
-                    usuario.deleted_at = (
-                        parse_datetime(payload["deleted_at"])
-                        if payload.get("deleted_at")
-                        else None
+
+                    sync_cursor = (
+                        await obtener_siguiente_usuarios_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
+
+                    usuario.deleted_at = datetime.now(
+                        timezone.utc
                     )
 
                     usuario.activo = False
 
-                    usuario.sync_status = "deleted"
-
-                    usuario.updated_at = (
-                        parse_datetime(payload["updated_at"])
-                        if payload.get("updated_at")
-                        else datetime.now(timezone.utc)
-                    )
-
-                    usuario.version = int(
-                        payload.get("version", usuario.version)
-                    )
-
                     usuario.sync_status = "synced"
+
+                    usuario.version += 1
+
+                    usuario.sync_cursor = sync_cursor
+
+                    usuario.updated_at = datetime.now(
+                        timezone.utc
+                    )
 
                     eventos_ws.append({
                         "tipo": "usuario_actualizado",
                         "accion": "usuario_eliminado",
-                        "empresa_uuid": str(payload["empresa_uuid"]),
-                        "usuario_id": str(payload["id"]),
+                        "empresa_uuid": str(
+                            empresa_uuid
+                        ),
+                        "usuario_id": str(
+                            usuario_id
+                        ),
                         "version": usuario.version
                     })
 
-                    await db.flush()
+                    await db.commit()
+
+                    await db.refresh(
+                        usuario
+                    )
+              
             elif item_type == "actualizar_usuario":
 
                 id = payload["id"]
@@ -4104,12 +4126,18 @@ async def sync_batch(
 
                 if not metodo_pago:
 
+                    sync_cursor = await obtener_siguiente_metodos_pago_cursor(
+                        db,
+                        payload["empresa_uuid"]
+                    )
+
                     metodo_pago = MetodoPago(
                         id=UUID(payload["id"]),
                         empresa_uuid=payload["empresa_uuid"],
                         nombre=payload["nombre"],
                         activo=payload["activo"],
                         version=payload.get("version", 1),
+                        sync_cursor=sync_cursor,
                         sync_status="synced",
                         created_at=(
                             parse_datetime(payload["created_at"])
@@ -4126,7 +4154,7 @@ async def sync_batch(
                     db.add(metodo_pago)
 
                     await db.flush()
-                    
+              
             elif item_type == "eliminar_rol":
 
                 rol_id = UUID(
