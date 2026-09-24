@@ -2086,6 +2086,231 @@ class CompraDetalle(Base):
         server_default=text("1")
     )
     
+class Devolucion(Base):
+
+    __tablename__ = "devoluciones"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        index=True
+    )
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        String(36),
+        nullable=False,
+        index=True
+    )
+
+    venta_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("ventas.id"),
+        nullable=False,
+        index=True
+    )
+
+    cliente_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("clientes.id"),
+        nullable=True
+    )
+
+    caja: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True
+    )
+
+    ncf: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True
+    )
+
+    ncf_modificado: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True
+    )
+
+    fecha: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    tipo: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False
+    )
+
+    subtotal: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False
+    )
+
+    itbis: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    total: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False
+    )
+
+    motivo: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    estado: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="completada",
+        server_default=text("'completada'")
+    )
+
+    usuario_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("usuarios.id"),
+        nullable=True
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="synced",
+        server_default=text("'synced'")
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1")
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    creado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    actualizado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    sync_cursor: Mapped[int] = mapped_column(
+        BigInteger,
+        unique=True,
+        nullable=False
+    )
+    
+class DevolucionDetalle(Base):
+
+    __tablename__ = "devolucion_detalle"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        index=True
+    )
+
+    empresa_uuid: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=False,
+        index=True
+    )
+
+    devolucion_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "devoluciones.id",
+            ondelete="CASCADE"
+        ),
+        nullable=False,
+        index=True
+    )
+
+    venta_detalle_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("venta_detalle.id"),
+        nullable=False,
+        index=True
+    )
+
+    producto_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("productos.id"),
+        nullable=False,
+        index=True
+    )
+
+    cantidad: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False
+    )
+
+    precio_unitario: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False
+    )
+
+    subtotal: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False
+    )
+
+    itbis: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    total: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False
+    )
+
+    sync_status: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        default="synced",
+        server_default=text("'synced'")
+    )
+
+    sync_cursor: Mapped[int | None] = mapped_column(
+        BigInteger,
+        nullable=True
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        server_default=text("NOW()")
+    )
+
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        server_default=text("NOW()")
+    )
+
 """ WEB PAGINA """
 
 class EmpresaDispositivo(Base):
