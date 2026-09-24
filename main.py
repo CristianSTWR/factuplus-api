@@ -5376,12 +5376,23 @@ async def sync_batch(
                     
             elif item_type == "crear_compra":
 
-                compra_id = UUID(payload["id"])
+                compra_id = UUID(
+                    payload["id"]
+                )
+
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "La compra no contiene empresa_uuid"
+                    )
 
                 q = await db.execute(
                     select(Compra).where(
                         Compra.id == compra_id,
-                        Compra.empresa_uuid == payload["empresa_uuid"]
+                        Compra.empresa_uuid == empresa_uuid
                     )
                 )
 
@@ -5389,85 +5400,160 @@ async def sync_batch(
 
                 if not compra:
 
+                    sync_cursor = (
+                        await obtener_siguiente_compras_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
+
                     compra = Compra(
                         id=compra_id,
-                        empresa_uuid=payload.get("empresa_uuid"),
-                        numero_compra=int(payload["numero_compra"]),
-                        suplidor_id=UUID(payload["suplidor_id"]),
+                        empresa_uuid=empresa_uuid,
+                        numero_compra=int(
+                            payload["numero_compra"]
+                        ),
+                        suplidor_id=UUID(
+                            payload["suplidor_id"]
+                        ),
                         usuario_id=(
                             UUID(payload["usuario_id"])
                             if payload.get("usuario_id")
                             else None
                         ),
-                        numero_factura=payload.get("numero_factura"),
-                        subtotal=payload.get("subtotal", 0),
-                        descuento=payload.get("descuento", 0),
-                        itbis=payload.get("itbis", 0),
-                        total=payload.get("total", 0),
+                        numero_factura=payload.get(
+                            "numero_factura"
+                        ),
+                        subtotal=payload.get(
+                            "subtotal",
+                            0
+                        ),
+                        descuento=payload.get(
+                            "descuento",
+                            0
+                        ),
+                        itbis=payload.get(
+                            "itbis",
+                            0
+                        ),
+                        total=payload.get(
+                            "total",
+                            0
+                        ),
                         created_at=(
-                            parse_datetime(payload["created_at"])
+                            parse_datetime(
+                                payload["created_at"]
+                            )
                             if payload.get("created_at")
                             else None
                         ),
                         updated_at=(
-                            parse_datetime(payload["updated_at"])
+                            parse_datetime(
+                                payload["updated_at"]
+                            )
                             if payload.get("updated_at")
                             else None
                         ),
                         deleted_at=(
-                            parse_datetime(payload["deleted_at"])
+                            parse_datetime(
+                                payload["deleted_at"]
+                            )
                             if payload.get("deleted_at")
                             else None
                         ),
                         sync_status="synced",
-                        version=int(payload.get("version", 1))
+                        version=int(
+                            payload.get(
+                                "version",
+                                1
+                            )
+                        ),
+                        sync_cursor=sync_cursor
                     )
 
-                    db.add(compra)
+                    db.add(
+                        compra
+                    )
 
                     await db.flush()
 
-                    for detalle in payload.get("detalles", []):
+                    for detalle in payload.get(
+                        "detalles",
+                        []
+                    ):
 
-                        detalle_id = UUID(detalle["id"])
+                        detalle_id = UUID(
+                            detalle["id"]
+                        )
 
                         q_detalle = await db.execute(
                             select(CompraDetalle).where(
                                 CompraDetalle.id == detalle_id,
-                                CompraDetalle.empresa_uuid == payload["empresa_uuid"]
+                                CompraDetalle.empresa_uuid == empresa_uuid
                             )
                         )
 
-                        compra_detalle = q_detalle.scalar_one_or_none()
+                        compra_detalle = (
+                            q_detalle.scalar_one_or_none()
+                        )
 
                         if not compra_detalle:
 
+                            detalle_sync_cursor = (
+                                await obtener_siguiente_compra_detalles_cursor(
+                                    db,
+                                    empresa_uuid
+                                )
+                            )
+
                             compra_detalle = CompraDetalle(
                                 id=detalle_id,
-                                empresa_uuid=payload["empresa_uuid"],
+                                empresa_uuid=empresa_uuid,
                                 compra_id=compra_id,
-                                producto_id=UUID(detalle["producto_id"]),
-                                cantidad=detalle.get("cantidad", 0),
-                                costo_unitario=detalle.get("costo_unitario", 0),
-                                subtotal=detalle.get("subtotal", 0),
+                                producto_id=UUID(
+                                    detalle["producto_id"]
+                                ),
+                                cantidad=detalle.get(
+                                    "cantidad",
+                                    0
+                                ),
+                                costo_unitario=detalle.get(
+                                    "costo_unitario",
+                                    0
+                                ),
+                                subtotal=detalle.get(
+                                    "subtotal",
+                                    0
+                                ),
                                 created_at=(
-                                    parse_datetime(detalle["created_at"])
+                                    parse_datetime(
+                                        detalle["created_at"]
+                                    )
                                     if detalle.get("created_at")
                                     else None
                                 ),
                                 updated_at=(
-                                    parse_datetime(detalle["updated_at"])
+                                    parse_datetime(
+                                        detalle["updated_at"]
+                                    )
                                     if detalle.get("updated_at")
                                     else None
                                 ),
                                 sync_status="synced",
-                                version=int(detalle.get("version", 1))
+                                version=int(
+                                    detalle.get(
+                                        "version",
+                                        1
+                                    )
+                                ),
+                                sync_cursor=detalle_sync_cursor
                             )
 
-                            db.add(compra_detalle)
+                            db.add(
+                                compra_detalle
+                            )
 
-                            await db.flush()
-                    
+                            await db.flush()     
                  
             
 
@@ -7494,14 +7580,12 @@ async def suplidores_changes(
 
 @app.get("/sync/compras/changes")
 async def compras_changes(
+    empresa_uuid: str,
+    cursor: int | None = None,
+    limit: int = 5000,
     authorization: str = Header(None),
-
-    empresa_uuid: str | None = None,
-    since: str | None = None,
-
     db: AsyncSession = Depends(get_db)
 ):
-
     token = authorization.replace(
         "Bearer ",
         ""
@@ -7522,30 +7606,51 @@ async def compras_changes(
         Compra.empresa_uuid == empresa_uuid
     )
 
-    if since:
-
-        since_dt = parser.isoparse(since)
-
-        since_dt = since_dt.replace(
-            tzinfo=None
-        )
-
+    if cursor is not None:
         query = query.where(
-            Compra.updated_at > since_dt
+            Compra.sync_cursor > cursor
         )
 
-    q = await db.execute(query)
+    query = query.order_by(
+        Compra.sync_cursor.asc()
+    )
 
-    compras = q.scalars().all()
+    query = query.limit(
+        limit
+    )
 
-    if not compras:
-        return []
+    result = await db.execute(
+        query
+    )
+
+    compras = result.scalars().all()
+
+    print(
+        "SYNC COMPRAS:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(compras),
+            "primer_cursor": (
+                compras[0].sync_cursor
+                if compras
+                else None
+            ),
+            "ultimo_cursor": (
+                compras[-1].sync_cursor
+                if compras
+                else None
+            )
+        }
+    )
 
     resultado = []
 
     for compra in compras:
 
-        detalle_query = select(CompraDetalle).where(
+        detalle_query = select(
+            CompraDetalle
+        ).where(
             CompraDetalle.compra_id == compra.id,
             CompraDetalle.empresa_uuid == empresa_uuid
         )
@@ -7557,57 +7662,234 @@ async def compras_changes(
         detalles = detalle_q.scalars().all()
 
         resultado.append({
-            "id": compra.id,
-            "empresa_uuid": compra.empresa_uuid,
-            "numero_compra": compra.numero_compra,
-            "suplidor_id": compra.suplidor_id,
-            "usuario_id": compra.usuario_id,
-            "numero_factura": compra.numero_factura,
-            "subtotal": compra.subtotal,
-            "descuento": compra.descuento,
-            "itbis": compra.itbis,
-            "total": compra.total,
+            "id": str(compra.id),
+
+            "empresa_uuid":
+                compra.empresa_uuid,
+
+            "numero_compra":
+                compra.numero_compra,
+
+            "suplidor_id":
+                str(compra.suplidor_id)
+                if compra.suplidor_id
+                else None,
+
+            "usuario_id":
+                str(compra.usuario_id)
+                if compra.usuario_id
+                else None,
+
+            "numero_factura":
+                compra.numero_factura,
+
+            "subtotal":
+                compra.subtotal,
+
+            "descuento":
+                compra.descuento,
+
+            "itbis":
+                compra.itbis,
+
+            "total":
+                compra.total,
+
             "created_at":
                 compra.created_at.isoformat()
                 if compra.created_at
                 else None,
+
             "updated_at":
                 compra.updated_at.isoformat()
                 if compra.updated_at
                 else None,
+
             "deleted_at":
                 compra.deleted_at.isoformat()
                 if compra.deleted_at
                 else None,
-            "sync_status": compra.sync_status,
-            "version": compra.version,
+
+            "sync_status":
+                compra.sync_status,
+
+            "version":
+                compra.version,
+
+            "sync_cursor":
+                compra.sync_cursor,
 
             "detalles": [
                 {
-                    "id": detalle.id,
-                    "empresa_uuid": detalle.empresa_uuid,
-                    "compra_id": detalle.compra_id,
-                    "producto_id": detalle.producto_id,
-                    "cantidad": detalle.cantidad,
-                    "costo_unitario": detalle.costo_unitario,
-                    "subtotal": detalle.subtotal,
+                    "id":
+                        str(detalle.id),
+
+                    "empresa_uuid":
+                        detalle.empresa_uuid,
+
+                    "compra_id":
+                        str(detalle.compra_id),
+
+                    "producto_id":
+                        str(detalle.producto_id)
+                        if detalle.producto_id
+                        else None,
+
+                    "cantidad":
+                        detalle.cantidad,
+
+                    "costo_unitario":
+                        detalle.costo_unitario,
+
+                    "subtotal":
+                        detalle.subtotal,
+
                     "created_at":
                         detalle.created_at.isoformat()
                         if detalle.created_at
                         else None,
+
                     "updated_at":
                         detalle.updated_at.isoformat()
                         if detalle.updated_at
                         else None,
-                    "sync_status": detalle.sync_status,
-                    "version": detalle.version
+
+                    "sync_status":
+                        detalle.sync_status,
+
+                    "version":
+                        detalle.version,
+
+                    "sync_cursor":
+                        detalle.sync_cursor
                 }
                 for detalle in detalles
             ]
         })
 
-    return resultado
+    return {
+        "items": resultado,
+        "has_more":
+            len(compras) == limit
+    }
+   
+@app.get("/sync/compras-detalles/changes")
+async def compras_detalles_changes(
+    empresa_uuid: str,
+    cursor: int | None = None,
+    limit: int = 5000,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
 
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(CompraDetalle).where(
+        CompraDetalle.empresa_uuid == empresa_uuid
+    )
+
+    if cursor is not None:
+        query = query.where(
+            CompraDetalle.sync_cursor > cursor
+        )
+
+    query = query.order_by(
+        CompraDetalle.sync_cursor.asc()
+    )
+
+    query = query.limit(
+        limit
+    )
+
+    result = await db.execute(
+        query
+    )
+
+    detalles = result.scalars().all()
+
+    print(
+        "SYNC COMPRAS DETALLES:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(detalles),
+            "primer_cursor": (
+                detalles[0].sync_cursor
+                if detalles
+                else None
+            ),
+            "ultimo_cursor": (
+                detalles[-1].sync_cursor
+                if detalles
+                else None
+            )
+        }
+    )
+
+    return {
+        "items": [
+            {
+                "id":
+                    str(detalle.id),
+
+                "empresa_uuid":
+                    detalle.empresa_uuid,
+
+                "compra_id":
+                    str(detalle.compra_id),
+
+                "producto_id":
+                    str(detalle.producto_id)
+                    if detalle.producto_id
+                    else None,
+
+                "cantidad":
+                    detalle.cantidad,
+
+                "costo_unitario":
+                    detalle.costo_unitario,
+
+                "subtotal":
+                    detalle.subtotal,
+
+                "created_at":
+                    detalle.created_at.isoformat()
+                    if detalle.created_at
+                    else None,
+
+                "updated_at":
+                    detalle.updated_at.isoformat()
+                    if detalle.updated_at
+                    else None,
+
+                "sync_status":
+                    detalle.sync_status,
+
+                "version":
+                    detalle.version,
+
+                "sync_cursor":
+                    detalle.sync_cursor
+            }
+            for detalle in detalles
+        ],
+        "has_more":
+            len(detalles) == limit
+    }
+     
 """ @app.post("/registrar-users")
 async def register_user(
     payload: dict,
@@ -11218,6 +11500,272 @@ async def restore_ventas_changes(
             len(ventas) == limit
     }
     
+@app.get("/restore/compras/changes")
+async def restore_compras_changes(
+    empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(Compra)
+        .where(
+            Compra.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            Compra.sync_cursor.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(
+        query
+    )
+
+    compras = result.scalars().all()
+
+    resultado = []
+
+    for compra in compras:
+
+        detalle_query = select(
+            CompraDetalle
+        ).where(
+            CompraDetalle.compra_id == compra.id,
+            CompraDetalle.empresa_uuid == empresa_uuid
+        )
+
+        detalle_q = await db.execute(
+            detalle_query
+        )
+
+        detalles = detalle_q.scalars().all()
+
+        resultado.append({
+            "id":
+                str(compra.id),
+
+            "empresa_uuid":
+                compra.empresa_uuid,
+
+            "numero_compra":
+                compra.numero_compra,
+
+            "suplidor_id":
+                str(compra.suplidor_id)
+                if compra.suplidor_id
+                else None,
+
+            "usuario_id":
+                str(compra.usuario_id)
+                if compra.usuario_id
+                else None,
+
+            "numero_factura":
+                compra.numero_factura,
+
+            "subtotal":
+                compra.subtotal,
+
+            "descuento":
+                compra.descuento,
+
+            "itbis":
+                compra.itbis,
+
+            "total":
+                compra.total,
+
+            "created_at":
+                compra.created_at.isoformat()
+                if compra.created_at
+                else None,
+
+            "updated_at":
+                compra.updated_at.isoformat()
+                if compra.updated_at
+                else None,
+
+            "deleted_at":
+                compra.deleted_at.isoformat()
+                if compra.deleted_at
+                else None,
+
+            "sync_status":
+                compra.sync_status,
+
+            "version":
+                compra.version,
+
+            "sync_cursor":
+                compra.sync_cursor,
+
+            "detalles": [
+                {
+                    "id":
+                        str(detalle.id),
+
+                    "empresa_uuid":
+                        detalle.empresa_uuid,
+
+                    "compra_id":
+                        str(detalle.compra_id),
+
+                    "producto_id":
+                        str(detalle.producto_id)
+                        if detalle.producto_id
+                        else None,
+
+                    "cantidad":
+                        detalle.cantidad,
+
+                    "costo_unitario":
+                        detalle.costo_unitario,
+
+                    "subtotal":
+                        detalle.subtotal,
+
+                    "created_at":
+                        detalle.created_at.isoformat()
+                        if detalle.created_at
+                        else None,
+
+                    "updated_at":
+                        detalle.updated_at.isoformat()
+                        if detalle.updated_at
+                        else None,
+
+                    "sync_status":
+                        detalle.sync_status,
+
+                    "version":
+                        detalle.version,
+
+                    "sync_cursor":
+                        detalle.sync_cursor
+                }
+                for detalle in detalles
+            ]
+        })
+
+    return {
+        "items": resultado,
+        "has_more":
+            len(compras) == limit
+    }
+    
+@app.get("/restore/compras-detalles/changes")
+async def restore_compras_detalles_changes(
+    empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(CompraDetalle)
+        .where(
+            CompraDetalle.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            CompraDetalle.sync_cursor.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    detalles = result.scalars().all()
+
+    print(
+        "RESTORE COMPRAS DETALLES:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "offset": offset,
+            "limit": limit,
+            "cantidad": len(detalles),
+            "primer_cursor": (
+                detalles[0].sync_cursor
+                if detalles
+                else None
+            ),
+            "ultimo_cursor": (
+                detalles[-1].sync_cursor
+                if detalles
+                else None
+            )
+        }
+    )
+
+    return {
+        "items": [
+            {
+                "id": str(detalle.id),
+                "empresa_uuid": detalle.empresa_uuid,
+                "compra_id": str(detalle.compra_id),
+                "producto_id": (
+                    str(detalle.producto_id)
+                    if detalle.producto_id
+                    else None
+                ),
+                "cantidad": detalle.cantidad,
+                "costo_unitario": detalle.costo_unitario,
+                "subtotal": detalle.subtotal,
+                "created_at": (
+                    detalle.created_at.isoformat()
+                    if detalle.created_at
+                    else None
+                ),
+                "updated_at": (
+                    detalle.updated_at.isoformat()
+                    if detalle.updated_at
+                    else None
+                ),
+                "sync_status": detalle.sync_status,
+                "version": detalle.version,
+                "sync_cursor": detalle.sync_cursor
+            }
+            for detalle in detalles
+        ],
+        "has_more": len(detalles) == limit
+    }
+
 @app.get("/restore/unidades_medida/changes")
 async def restore_unidades_medida_changes(
     empresa_uuid: str,
@@ -12591,5 +13139,142 @@ async def obtener_siguiente_suplidores_cursor(
     return int(
         resultado_final.scalar_one()
     )
+    
+async def obtener_siguiente_compras_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                compras_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT compras_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM compras
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET compras_cursor = :compras_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING compras_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "compras_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
+    
+async def obtener_siguiente_compra_detalles_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                compras_detalles_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {"empresa_uuid": empresa_uuid}
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT compras_detalles_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {"empresa_uuid": empresa_uuid}
+    )
+
+    cursor_actual = int(resultado.scalar_one() or 0)
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(MAX(sync_cursor), 0)
+            FROM compras_detalles
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {"empresa_uuid": empresa_uuid}
+    )
+
+    max_cursor = int(resultado_max.scalar_one() or 0)
+
+    siguiente_cursor = max(cursor_actual, max_cursor) + 1
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET compras_detalles_cursor = :compras_detalles_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING compras_detalles_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "compras_detalles_cursor": siguiente_cursor
+        }
+    )
+
+    return int(resultado_final.scalar_one())
 
 """  """

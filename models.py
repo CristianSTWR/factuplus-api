@@ -2000,6 +2000,12 @@ class Compra(Base):
         server_default=text("1")
     )
     
+    sync_cursor: Mapped[int] = mapped_column(
+        BigInteger,
+        unique=True,
+        nullable=False
+    )
+    
 class CompraDetalle(Base):
 
     __tablename__ = "compras_detalles"
@@ -2065,6 +2071,12 @@ class CompraDetalle(Base):
         nullable=False,
         default="synced",
         server_default=text("'synced'")
+    )
+    
+    sync_cursor: Mapped[int] = mapped_column(
+        BigInteger,
+        unique=True,
+        nullable=False
     )
 
     version: Mapped[int] = mapped_column(
