@@ -4354,8 +4354,24 @@ async def sync_batch(
                         else datetime.now(timezone.utc)
                     )
 
+                    eventos_ws.append({
+                        "tipo": "usuario_rol_actualizado",
+                        "accion": "usuario_rol_eliminado",
+                        "empresa_uuid": str(
+                            empresa_uuid
+                        ),
+                        "usuario_id": str(
+                            usuario_id
+                        ),
+                        "rol_id": str(
+                            rol_id
+                        ),
+                        "version": usuario_rol.version,
+                        "sync_cursor": usuario_rol.sync_cursor
+                    })
+
                     await db.flush()
-                    
+             
             elif item_type == "crear_producto":
 
                 producto_id = UUID(
