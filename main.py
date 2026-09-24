@@ -5099,12 +5099,11 @@ async def company_changes(
 @app.get("/sync/usuarios/changes")
 async def users_changes(
     empresa_uuid: str,
-    since: str | None = None,
+    cursor: int | None = None,
+    limit: int = 5000,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
-    
-    
     token = authorization.replace(
         "Bearer ",
         ""
@@ -5114,71 +5113,112 @@ async def users_changes(
         token,
         db
     )
-    
+
     if usuario_actual.empresa_uuid != empresa_uuid:
         raise HTTPException(
             status_code=403,
             detail="Acceso denegado"
         )
-    
-    
-    
+
     query = select(User).where(
         User.empresa_uuid == empresa_uuid
     )
 
-    if since:
-        since_dt = parser.isoparse(since)
-
-        if since_dt.tzinfo is None:
-            since_dt = since_dt.replace(tzinfo=timezone.utc)
-
-        since_dt = since_dt.astimezone(timezone.utc)
-
+    if cursor is not None:
         query = query.where(
-            User.updated_at > since_dt
+            User.sync_cursor > cursor
         )
 
-    q = await db.execute(query)
+    query = query.order_by(
+        User.sync_cursor.asc()
+    )
 
-    users = q.scalars().all()
+    query = query.limit(
+        limit
+    )
 
-    print("USERS:", len(users))
-    print(users)
+    result = await db.execute(
+        query
+    )
 
-    return [
+    users = result.scalars().all()
+
+    print(
+        "SYNC USUARIOS:",
         {
-            "id": str(u.id),
-            "empresa_uuid": u.empresa_uuid,
-            "nombre": u.nombre,
-            "usuario": u.usuario,
-
-
-            "activo": u.activo,
-            "permitir_nube": u.permitir_nube,
-
-            "token": u.token,
-            "codigo": u.codigo,
-
-            "sync_status": u.sync_status,
-
-            "deleted_at":
-                u.deleted_at.isoformat()
-                if u.deleted_at else None,
-
-            "updated_at":
-                u.updated_at.isoformat()
-                if u.updated_at else None,
-
-            "version": u.version,
-
-            "created_at":
-                u.created_at.isoformat()
-                if u.created_at else None
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(users),
+            "primer_cursor": (
+                users[0].sync_cursor
+                if users
+                else None
+            ),
+            "ultimo_cursor": (
+                users[-1].sync_cursor
+                if users
+                else None
+            )
         }
-        for u in users
-    ]
-    
+    )
+
+    return {
+        "items": [
+            {
+                "id": str(u.id),
+
+                "empresa_uuid":
+                    u.empresa_uuid,
+
+                "nombre":
+                    u.nombre,
+
+                "usuario":
+                    u.usuario,
+
+                "activo":
+                    u.activo,
+
+                "permitir_nube":
+                    u.permitir_nube,
+
+                "token":
+                    u.token,
+
+                "codigo":
+                    u.codigo,
+
+                "sync_status":
+                    u.sync_status,
+
+                "version":
+                    u.version,
+
+                "sync_cursor":
+                    u.sync_cursor,
+
+                "deleted_at":
+                    u.deleted_at.isoformat()
+                    if u.deleted_at
+                    else None,
+
+                "created_at":
+                    u.created_at.isoformat()
+                    if u.created_at
+                    else None,
+
+                "updated_at":
+                    u.updated_at.isoformat()
+                    if u.updated_at
+                    else None
+            }
+            for u in users
+        ],
+
+        "has_more":
+            len(users) == limit
+    }
+     
 @app.get("/sync/cajas_config/changes")
 async def cajas_config_changes(
     empresa_uuid: str,
@@ -9373,6 +9413,8 @@ async def restore_company_changes(
 @app.get("/restore/usuarios/changes")
 async def restore_users_changes(
     empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
@@ -9388,73 +9430,84 @@ async def restore_users_changes(
         ""
     ).strip()
 
-    try:
-
-        payload = jwt.decode(
-            token_tmp,
-            JWT_SECRET,
-            algorithms=[JWT_ALGORITHM]
-        )
-
-    except JWTError:
-
-        raise HTTPException(
-            status_code=401,
-            detail="Token temporal inválido"
-        )
-
-    if payload.get("tipo") != "restore":
-        raise HTTPException(
-            status_code=401,
-            detail="Token temporal inválido"
-        )
-
-    if str(payload.get("empresa_uuid")) != empresa_uuid:
-        raise HTTPException(
-            status_code=403,
-            detail="Acceso denegado"
-        )
-
-    q = await db.execute(
-        select(User).where(
-            User.empresa_uuid == empresa_uuid
-        )
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
     )
 
-    users = q.scalars().all()
+    query = (
+        select(User)
+        .where(
+            User.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            User.sync_cursor.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
 
-    return [
-        {
-            "id": str(u.id),
-            "empresa_uuid": u.empresa_uuid,
-            "nombre": u.nombre,
-            "usuario": u.usuario,
+    result = await db.execute(query)
 
-            "activo": u.activo,
-            "permitir_nube": u.permitir_nube,
+    users = result.scalars().all()
 
-            "token": u.token,
-            "codigo": u.codigo,
+    return {
+        "items": [
+            {
+                "id": str(u.id),
 
-            "sync_status": u.sync_status,
+                "empresa_uuid":
+                    u.empresa_uuid,
 
-            "deleted_at":
-                u.deleted_at.isoformat()
-                if u.deleted_at else None,
+                "nombre":
+                    u.nombre,
 
-            "updated_at":
-                u.updated_at.isoformat()
-                if u.updated_at else None,
+                "usuario":
+                    u.usuario,
 
-            "version": u.version,
+                "activo":
+                    u.activo,
 
-            "created_at":
-                u.created_at.isoformat()
-                if u.created_at else None
-        }
-        for u in users
-    ]
-    
+                "permitir_nube":
+                    u.permitir_nube,
+
+                "token":
+                    u.token,
+
+                "codigo":
+                    u.codigo,
+
+                "sync_status":
+                    u.sync_status,
+
+                "version":
+                    u.version,
+
+                "sync_cursor":
+                    u.sync_cursor,
+
+                "deleted_at":
+                    u.deleted_at.isoformat()
+                    if u.deleted_at
+                    else None,
+
+                "updated_at":
+                    u.updated_at.isoformat()
+                    if u.updated_at
+                    else None,
+
+                "created_at":
+                    u.created_at.isoformat()
+                    if u.created_at
+                    else None
+            }
+            for u in users
+        ],
+
+        "has_more":
+            len(users) == limit
+    }
+      
 @app.get("/restore/cajas_config/changes")
 async def restore_cajas_config_changes(
     empresa_uuid: str,

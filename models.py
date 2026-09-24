@@ -504,6 +504,12 @@ class User(Base):
     server_default=text("CURRENT_TIMESTAMP")
 )
     
+    sync_cursor: Mapped[int] = mapped_column(
+    BigInteger,
+    unique=True,
+    nullable=False
+)
+    
 class CajaConfig(Base):
 
     __tablename__ = "cajas_config"
@@ -1364,10 +1370,10 @@ class RolPermiso(Base):
     )
     
     sync_cursor: Mapped[int] = mapped_column(
-                        BigInteger,
-                        unique=True,
-                        nullable=False
-                    )
+        BigInteger,
+        unique=True,
+        nullable=False
+    )
     
 class Rol(Base):
 
