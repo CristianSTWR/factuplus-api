@@ -2035,6 +2035,7 @@ async def sync_batch(
                 "cerrar_caja": 13,
                 "producto_sumarstock": 14,
                 "producto_reducirstock": 15,
+                "pago_actualizar": 16,
             }.get(x["type"], 999)
         )
                 
@@ -5556,7 +5557,89 @@ async def sync_batch(
                             await db.flush()     
                  
             
+            elif item_type == "pago_actualizar":
 
+                pago_id = UUID(
+                    payload["id"]
+                )
+
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "El método de pago no contiene empresa_uuid"
+                    )
+
+                q = await db.execute(
+                    select(MetodoPago).where(
+                        MetodoPago.id == pago_id,
+                        MetodoPago.empresa_uuid == empresa_uuid
+                    )
+                )
+
+                metodo_pago = q.scalar_one_or_none()
+
+                if metodo_pago:
+
+                    sync_cursor = (
+                        await obtener_siguiente_metodos_pago_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
+
+                    metodo_pago.nombre = payload.get(
+                        "nombre",
+                        metodo_pago.nombre
+                    )
+
+                    metodo_pago.activo = payload.get(
+                        "activo",
+                        metodo_pago.activo
+                    )
+
+                    metodo_pago.sync_status = payload.get(
+                        "sync_status",
+                        "synced"
+                    )
+
+                    metodo_pago.version = int(
+                        payload.get(
+                            "version",
+                            metodo_pago.version + 1
+                        )
+                    )
+
+                    metodo_pago.sync_cursor = sync_cursor
+
+                    metodo_pago.updated_at = (
+                        parse_datetime(
+                            payload["updated_at"]
+                        )
+                        if payload.get("updated_at")
+                        else None
+                    )
+
+                    eventos_ws.append({
+                        "tipo": "pago_actualizado",
+                        "accion": "actualizado",
+                        "empresa_uuid": str(
+                            empresa_uuid
+                        ),
+                        "pago_id": str(
+                            pago_id
+                        ),
+                        "version": metodo_pago.version
+                    })
+
+                    await db.commit()
+
+                    await db.refresh(
+                        metodo_pago
+                    )
+        
             """ elif item_type == "create_producto":
 
                 q = await db.execute(
