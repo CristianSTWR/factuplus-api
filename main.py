@@ -75,7 +75,7 @@ import httpx
 import re
 # APLICACION
 from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, Producto, UnidadMedida, Rol, RolPermiso, UsuarioRol, MetodoPago, Cliente, Suplidor
-from models import Compra, CompraDetalle, VentaDetalle, Pago, HistorialStock
+from models import Compra, CompraDetalle, VentaDetalle, Pago, HistorialStock, Devolucion, DevolucionDetalle
 
 # WEB
 from models import ListaEspera, EmpresaDispositivo
@@ -5639,7 +5639,332 @@ async def sync_batch(
                     await db.refresh(
                         metodo_pago
                     )
-        
+            elif item_type == "crear_devolucion":
+
+                devolucion_id = UUID(
+                    payload["id"]
+                )
+
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "La devolución no contiene empresa_uuid"
+                    )
+
+                q = await db.execute(
+                    select(Devolucion).where(
+                        Devolucion.id == devolucion_id,
+                        Devolucion.empresa_uuid == empresa_uuid
+                    )
+                )
+
+                devolucion_exists = (
+                    q.scalar_one_or_none()
+                )
+
+                if not devolucion_exists:
+
+                    sync_cursor = (
+                        await obtener_siguiente_devoluciones_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
+
+                    devolucion = Devolucion(
+                        id=devolucion_id,
+
+                        empresa_uuid=empresa_uuid,
+
+                        venta_id=UUID(
+                            payload["venta_id"]
+                        ),
+
+                        cliente_id=(
+                            UUID(payload["cliente_id"])
+                            if payload.get("cliente_id")
+                            else None
+                        ),
+
+                        caja=payload.get(
+                            "caja"
+                        ),
+
+                        ncf=payload.get(
+                            "ncf"
+                        ),
+
+                        ncf_modificado=payload.get(
+                            "ncf_modificado"
+                        ),
+
+                        fecha=(
+                            parse_datetime(
+                                payload["fecha"]
+                            )
+                            if payload.get("fecha")
+                            else None
+                        ),
+
+                        tipo=payload.get(
+                            "tipo",
+                            "parcial"
+                        ),
+
+                        subtotal=Decimal(
+                            str(
+                                payload.get(
+                                    "subtotal",
+                                    0
+                                )
+                            )
+                        ),
+
+                        itbis=Decimal(
+                            str(
+                                payload.get(
+                                    "itbis",
+                                    0
+                                )
+                            )
+                        ),
+
+                        total=Decimal(
+                            str(
+                                payload.get(
+                                    "total",
+                                    0
+                                )
+                            )
+                        ),
+
+                        motivo=payload.get(
+                            "motivo"
+                        ),
+
+                        estado=payload.get(
+                            "estado",
+                            "completada"
+                        ),
+
+                        usuario_id=(
+                            UUID(payload["usuario_id"])
+                            if payload.get("usuario_id")
+                            else None
+                        ),
+
+                        sync_status=payload.get(
+                            "sync_status",
+                            "synced"
+                        ),
+
+                        version=int(
+                            payload.get(
+                                "version",
+                                1
+                            )
+                        ),
+
+                        deleted_at=(
+                            parse_datetime(
+                                payload["deleted_at"]
+                            )
+                            if payload.get("deleted_at")
+                            else None
+                        ),
+
+                        creado_en=(
+                            parse_datetime(
+                                payload["creado_en"]
+                            )
+                            if payload.get("creado_en")
+                            else None
+                        ),
+
+                        actualizado_en=(
+                            parse_datetime(
+                                payload["actualizado_en"]
+                            )
+                            if payload.get("actualizado_en")
+                            else None
+                        ),
+
+                        sync_cursor=sync_cursor
+                    )
+
+                    db.add(
+                        devolucion
+                    )
+
+                    await db.flush()
+
+                    detalles = payload.get(
+                        "detalles",
+                        []
+                    )
+
+                    for detalle_data in detalles:
+
+                        detalle_id = UUID(
+                            detalle_data["id"]
+                        )
+
+                        q_detalle = await db.execute(
+                            select(DevolucionDetalle).where(
+                                DevolucionDetalle.id == detalle_id,
+                                DevolucionDetalle.empresa_uuid == empresa_uuid
+                            )
+                        )
+
+                        detalle_exists = (
+                            q_detalle.scalar_one_or_none()
+                        )
+
+                        if detalle_exists:
+                            continue
+
+                        detalle_cursor = (
+                            await obtener_siguiente_devolucion_detalle_cursor(
+                                db,
+                                empresa_uuid
+                            )
+                        )
+
+                        detalle = DevolucionDetalle(
+                            id=detalle_id,
+
+                            empresa_uuid=empresa_uuid,
+
+                            devolucion_id=devolucion_id,
+
+                            venta_detalle_id=UUID(
+                                detalle_data[
+                                    "venta_detalle_id"
+                                ]
+                            ),
+
+                            producto_id=UUID(
+                                detalle_data[
+                                    "producto_id"
+                                ]
+                            ),
+
+                            cantidad=Decimal(
+                                str(
+                                    detalle_data.get(
+                                        "cantidad",
+                                        0
+                                    )
+                                )
+                            ),
+
+                            precio_unitario=Decimal(
+                                str(
+                                    detalle_data.get(
+                                        "precio_unitario",
+                                        0
+                                    )
+                                )
+                            ),
+
+                            subtotal=Decimal(
+                                str(
+                                    detalle_data.get(
+                                        "subtotal",
+                                        0
+                                    )
+                                )
+                            ),
+
+                            itbis=Decimal(
+                                str(
+                                    detalle_data.get(
+                                        "itbis",
+                                        0
+                                    )
+                                )
+                            ),
+
+                            total=Decimal(
+                                str(
+                                    detalle_data.get(
+                                        "total",
+                                        0
+                                    )
+                                )
+                            ),
+
+                            sync_status=detalle_data.get(
+                                "sync_status",
+                                "synced"
+                            ),
+
+                            sync_cursor=detalle_cursor,
+
+                            deleted_at=(
+                                parse_datetime(
+                                    detalle_data[
+                                        "deleted_at"
+                                    ]
+                                )
+                                if detalle_data.get(
+                                    "deleted_at"
+                                )
+                                else None
+                            ),
+
+                            created_at=(
+                                parse_datetime(
+                                    detalle_data[
+                                        "creado_en"
+                                    ]
+                                )
+                                if detalle_data.get(
+                                    "creado_en"
+                                )
+                                else (
+                                    parse_datetime(
+                                        detalle_data[
+                                            "created_at"
+                                        ]
+                                    )
+                                    if detalle_data.get(
+                                        "created_at"
+                                    )
+                                    else None
+                                )
+                            ),
+
+                            updated_at=(
+                                parse_datetime(
+                                    detalle_data[
+                                        "actualizado_en"
+                                    ]
+                                )
+                                if detalle_data.get(
+                                    "actualizado_en"
+                                )
+                                else (
+                                    parse_datetime(
+                                        detalle_data[
+                                            "updated_at"
+                                        ]
+                                    )
+                                    if detalle_data.get(
+                                        "updated_at"
+                                    )
+                                    else None
+                                )
+                            )
+                        )
+
+                        db.add(
+                            detalle
+                        )
+                    
             """ elif item_type == "create_producto":
 
                 q = await db.execute(
@@ -7972,7 +8297,287 @@ async def compras_detalles_changes(
         "has_more":
             len(detalles) == limit
     }
-     
+    
+@app.get("/sync/devoluciones/changes")
+async def devoluciones_changes(
+    empresa_uuid: str,
+    cursor: int | None = None,
+    limit: int = 5000,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(Devolucion).where(
+        Devolucion.empresa_uuid == empresa_uuid
+    )
+
+    if cursor is not None:
+        query = query.where(
+            Devolucion.sync_cursor > cursor
+        )
+
+    query = query.order_by(
+        Devolucion.sync_cursor.asc()
+    )
+
+    query = query.limit(
+        limit
+    )
+
+    result = await db.execute(
+        query
+    )
+
+    devoluciones = result.scalars().all()
+
+    print(
+        "SYNC DEVOLUCIONES:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(devoluciones),
+            "primer_cursor": (
+                devoluciones[0].sync_cursor
+                if devoluciones
+                else None
+            ),
+            "ultimo_cursor": (
+                devoluciones[-1].sync_cursor
+                if devoluciones
+                else None
+            )
+        }
+    )
+
+    return {
+        "items": [
+            {
+                "id":
+                    str(d.id),
+
+                "empresa_uuid":
+                    d.empresa_uuid,
+
+                "venta_id":
+                    str(d.venta_id)
+                    if d.venta_id
+                    else None,
+
+                "cliente_id":
+                    str(d.cliente_id)
+                    if d.cliente_id
+                    else None,
+
+                "caja":
+                    d.caja,
+
+                "ncf":
+                    d.ncf,
+
+                "ncf_modificado":
+                    d.ncf_modificado,
+
+                "fecha":
+                    d.fecha.isoformat()
+                    if d.fecha
+                    else None,
+
+                "tipo":
+                    d.tipo,
+
+                "subtotal":
+                    float(d.subtotal or 0),
+
+                "itbis":
+                    float(d.itbis or 0),
+
+                "total":
+                    float(d.total or 0),
+
+                "motivo":
+                    d.motivo,
+
+                "estado":
+                    d.estado,
+
+                "usuario_id":
+                    str(d.usuario_id)
+                    if d.usuario_id
+                    else None,
+
+                "sync_status":
+                    d.sync_status,
+
+                "version":
+                    d.version,
+
+                "sync_cursor":
+                    d.sync_cursor,
+
+                "deleted_at":
+                    d.deleted_at.isoformat()
+                    if d.deleted_at
+                    else None,
+
+                "creado_en":
+                    d.creado_en.isoformat()
+                    if d.creado_en
+                    else None,
+
+                "actualizado_en":
+                    d.actualizado_en.isoformat()
+                    if d.actualizado_en
+                    else None
+            }
+            for d in devoluciones
+        ],
+
+        "has_more":
+            len(devoluciones) == limit
+    }
+
+@app.get("/sync/devolucion-detalles/changes")
+async def devolucion_detalles_changes(
+    empresa_uuid: str,
+    cursor: int | None = None,
+    limit: int = 5000,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(DevolucionDetalle).where(
+        DevolucionDetalle.empresa_uuid == empresa_uuid
+    )
+
+    if cursor is not None:
+        query = query.where(
+            DevolucionDetalle.sync_cursor > cursor
+        )
+
+    query = query.order_by(
+        DevolucionDetalle.sync_cursor.asc()
+    )
+
+    query = query.limit(
+        limit
+    )
+
+    result = await db.execute(
+        query
+    )
+
+    detalles = result.scalars().all()
+
+    print(
+        "SYNC DEVOLUCION DETALLES:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(detalles),
+            "primer_cursor": (
+                detalles[0].sync_cursor
+                if detalles
+                else None
+            ),
+            "ultimo_cursor": (
+                detalles[-1].sync_cursor
+                if detalles
+                else None
+            )
+        }
+    )
+
+    return {
+        "items": [
+            {
+                "id":
+                    str(d.id),
+
+                "empresa_uuid":
+                    str(d.empresa_uuid),
+
+                "devolucion_id":
+                    str(d.devolucion_id),
+
+                "venta_detalle_id":
+                    str(d.venta_detalle_id),
+
+                "producto_id":
+                    str(d.producto_id),
+
+                "cantidad":
+                    float(d.cantidad or 0),
+
+                "precio_unitario":
+                    float(d.precio_unitario or 0),
+
+                "subtotal":
+                    float(d.subtotal or 0),
+
+                "itbis":
+                    float(d.itbis or 0),
+
+                "total":
+                    float(d.total or 0),
+
+                "sync_status":
+                    d.sync_status,
+
+                "sync_cursor":
+                    d.sync_cursor,
+
+                "deleted_at":
+                    d.deleted_at.isoformat()
+                    if d.deleted_at
+                    else None,
+
+                "created_at":
+                    d.created_at.isoformat()
+                    if d.created_at
+                    else None,
+
+                "updated_at":
+                    d.updated_at.isoformat()
+                    if d.updated_at
+                    else None
+            }
+            for d in detalles
+        ],
+
+        "has_more":
+            len(detalles) == limit
+    }
+
 """ @app.post("/registrar-users")
 async def register_user(
     payload: dict,
@@ -12119,7 +12724,237 @@ async def restore_suplidores_changes(
         "has_more":
             len(suplidores) == limit
     }
-      
+    
+@app.get("/restore/devoluciones/changes")
+async def restore_devoluciones_changes(
+    empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(Devolucion)
+        .where(
+            Devolucion.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            Devolucion.sync_cursor.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    devoluciones = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id":
+                    str(d.id),
+
+                "empresa_uuid":
+                    d.empresa_uuid,
+
+                "venta_id":
+                    str(d.venta_id)
+                    if d.venta_id
+                    else None,
+
+                "cliente_id":
+                    str(d.cliente_id)
+                    if d.cliente_id
+                    else None,
+
+                "caja":
+                    d.caja,
+
+                "ncf":
+                    d.ncf,
+
+                "ncf_modificado":
+                    d.ncf_modificado,
+
+                "fecha":
+                    d.fecha.isoformat()
+                    if d.fecha
+                    else None,
+
+                "tipo":
+                    d.tipo,
+
+                "subtotal":
+                    float(d.subtotal or 0),
+
+                "itbis":
+                    float(d.itbis or 0),
+
+                "total":
+                    float(d.total or 0),
+
+                "motivo":
+                    d.motivo,
+
+                "estado":
+                    d.estado,
+
+                "usuario_id":
+                    str(d.usuario_id)
+                    if d.usuario_id
+                    else None,
+
+                "sync_status":
+                    d.sync_status,
+
+                "version":
+                    d.version,
+
+                "sync_cursor":
+                    d.sync_cursor,
+
+                "deleted_at":
+                    d.deleted_at.isoformat()
+                    if d.deleted_at
+                    else None,
+
+                "creado_en":
+                    d.creado_en.isoformat()
+                    if d.creado_en
+                    else None,
+
+                "actualizado_en":
+                    d.actualizado_en.isoformat()
+                    if d.actualizado_en
+                    else None
+            }
+            for d in devoluciones
+        ],
+
+        "has_more":
+            len(devoluciones) == limit
+    }
+
+@app.get("/restore/devolucion-detalles/changes")
+async def restore_devolucion_detalles_changes(
+    empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(DevolucionDetalle)
+        .where(
+            DevolucionDetalle.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            DevolucionDetalle.sync_cursor.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    detalles = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id":
+                    str(d.id),
+
+                "empresa_uuid":
+                    str(d.empresa_uuid),
+
+                "devolucion_id":
+                    str(d.devolucion_id),
+
+                "venta_detalle_id":
+                    str(d.venta_detalle_id),
+
+                "producto_id":
+                    str(d.producto_id),
+
+                "cantidad":
+                    float(d.cantidad or 0),
+
+                "precio_unitario":
+                    float(d.precio_unitario or 0),
+
+                "subtotal":
+                    float(d.subtotal or 0),
+
+                "itbis":
+                    float(d.itbis or 0),
+
+                "total":
+                    float(d.total or 0),
+
+                "sync_status":
+                    d.sync_status,
+
+                "sync_cursor":
+                    d.sync_cursor,
+
+                "deleted_at":
+                    d.deleted_at.isoformat()
+                    if d.deleted_at
+                    else None,
+
+                "created_at":
+                    d.created_at.isoformat()
+                    if d.created_at
+                    else None,
+
+                "updated_at":
+                    d.updated_at.isoformat()
+                    if d.updated_at
+                    else None
+            }
+            for d in detalles
+        ],
+
+        "has_more":
+            len(detalles) == limit
+    }
+    
 from pydantic import BaseModel
 
 class TokenTmpRequest(BaseModel):
@@ -13359,5 +14194,82 @@ async def obtener_siguiente_compra_detalles_cursor(
     )
 
     return int(resultado_final.scalar_one())
+
+async def obtener_siguiente_devoluciones_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                devoluciones_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT devoluciones_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM devoluciones
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET devoluciones_cursor = :devoluciones_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING devoluciones_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "devoluciones_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
 
 """  """
