@@ -5754,10 +5754,7 @@ async def sync_batch(
                             else None
                         ),
 
-                        sync_status=payload.get(
-                            "sync_status",
-                            "synced"
-                        ),
+                        sync_status="synced",
 
                         deleted_at=(
                             parse_datetime(
@@ -5888,10 +5885,7 @@ async def sync_batch(
                                 )
                             ),
 
-                            sync_status=detalle_data.get(
-                                "sync_status",
-                                "synced"
-                            ),
+                            sync_status="synced",
 
                             sync_cursor=detalle_cursor,
 
