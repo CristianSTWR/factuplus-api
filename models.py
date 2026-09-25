@@ -2098,10 +2098,10 @@ class Devolucion(Base):
     )
 
     empresa_uuid: Mapped[str] = mapped_column(
-        String(36),
-        nullable=False,
-        index=True
-    )
+            String(36),
+            nullable=False,
+            index=True
+        )
 
     venta_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -2218,11 +2218,11 @@ class DevolucionDetalle(Base):
         index=True
     )
 
-    empresa_uuid: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
-        nullable=False,
-        index=True
-    )
+    empresa_uuid: Mapped[str] = mapped_column(
+            String(36),
+            nullable=False,
+            index=True
+        )
 
     devolucion_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
