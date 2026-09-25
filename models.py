@@ -2116,10 +2116,14 @@ class Devolucion(Base):
         nullable=True
     )
 
-    caja: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True
-    )
+    caja: Mapped[UUID] = mapped_column(
+    PG_UUID(as_uuid=True),
+    ForeignKey(
+        "cajas_config.id",
+        ondelete="RESTRICT"
+    ),
+    nullable=False
+)
 
     ncf: Mapped[str | None] = mapped_column(
         String(50),
