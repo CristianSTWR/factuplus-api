@@ -5689,11 +5689,7 @@ async def sync_batch(
                             else None
                         ),
 
-                        caja=(
-                            UUID(payload["caja"])
-                            if payload.get("caja")
-                            else None
-                        ),
+                        caja = UUID(payload["caja"]),
 
                         ncf=payload.get(
                             "ncf"
@@ -5773,17 +5769,17 @@ async def sync_batch(
 
                         created_at=(
                             parse_datetime(
-                                payload["creado_en"]
+                                payload["created_at"]
                             )
-                            if payload.get("creado_en")
+                            if payload.get("created_at")
                             else None
                         ),
 
                         updated_at=(
                             parse_datetime(
-                                payload["actualizado_en"]
+                                payload["updated_at"]
                             )
-                            if payload.get("actualizado_en")
+                            if payload.get("updated_at")
                             else None
                         ),
 
@@ -5914,11 +5910,11 @@ async def sync_batch(
                             created_at=(
                                 parse_datetime(
                                     detalle_data[
-                                        "creado_en"
+                                        "created_at"
                                     ]
                                 )
                                 if detalle_data.get(
-                                    "creado_en"
+                                    "created_at"
                                 )
                                 else (
                                     parse_datetime(
@@ -5936,11 +5932,11 @@ async def sync_batch(
                             updated_at=(
                                 parse_datetime(
                                     detalle_data[
-                                        "actualizado_en"
+                                        "updated_at"
                                     ]
                                 )
                                 if detalle_data.get(
-                                    "actualizado_en"
+                                    "updated_at"
                                 )
                                 else (
                                     parse_datetime(
@@ -8426,14 +8422,14 @@ async def devoluciones_changes(
                     if d.deleted_at
                     else None,
 
-                "creado_en":
-                    d.creado_en.isoformat()
-                    if d.creado_en
+                "created_at":
+                    d.created_at.isoformat()
+                    if d.created_at
                     else None,
 
-                "actualizado_en":
-                    d.actualizado_en.isoformat()
-                    if d.actualizado_en
+                "updated_at":
+                    d.updated_at.isoformat()
+                    if d.updated_at
                     else None
             }
             for d in devoluciones
@@ -12825,14 +12821,14 @@ async def restore_devoluciones_changes(
                     if d.deleted_at
                     else None,
 
-                "creado_en":
-                    d.creado_en.isoformat()
-                    if d.creado_en
+                "created_at":
+                    d.created_at.isoformat()
+                    if d.created_at
                     else None,
 
-                "actualizado_en":
-                    d.actualizado_en.isoformat()
-                    if d.actualizado_en
+                "updated_at":
+                    d.updated_at.isoformat()
+                    if d.updated_at
                     else None
             }
             for d in devoluciones
