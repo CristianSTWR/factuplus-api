@@ -5689,8 +5689,10 @@ async def sync_batch(
                             else None
                         ),
 
-                        caja=payload.get(
-                            "caja"
+                        caja=(
+                            UUID(payload["caja"])
+                            if payload.get("caja")
+                            else None
                         ),
 
                         ncf=payload.get(
