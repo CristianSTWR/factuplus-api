@@ -5769,7 +5769,7 @@ async def sync_batch(
                             else None
                         ),
 
-                        creado_en=(
+                        created_at=(
                             parse_datetime(
                                 payload["creado_en"]
                             )
@@ -5777,7 +5777,7 @@ async def sync_batch(
                             else None
                         ),
 
-                        actualizado_en=(
+                        updated_at=(
                             parse_datetime(
                                 payload["actualizado_en"]
                             )
