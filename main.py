@@ -8293,7 +8293,7 @@ async def compras_detalles_changes(
     
 @app.get("/sync/devoluciones/changes")
 async def devoluciones_changes(
-    empresa_uuid: str,
+    empresa_uuid: UUID,
     cursor: int | None = None,
     limit: int = 5000,
     authorization: str = Header(None),
