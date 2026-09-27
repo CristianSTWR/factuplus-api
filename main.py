@@ -5133,6 +5133,11 @@ async def sync_batch(
 
                 if not cliente:
 
+                    siguiente_cursor = await obtener_siguiente_clientes_cursor(
+                        db,
+                        payload["empresa_uuid"]
+                    )
+
                     cliente = Cliente(
                         id=cliente_id,
                         empresa_uuid=payload["empresa_uuid"],
@@ -5149,6 +5154,7 @@ async def sync_batch(
                         estado_credito=payload.get("estado_credito", "al_dia"),
                         activo=payload.get("activo", True),
                         version=payload.get("version", 1),
+                        sync_cursor=siguiente_cursor,
                         sync_status="synced",
                         created_at=(
                             parse_datetime(payload["created_at"])
@@ -5171,7 +5177,6 @@ async def sync_batch(
 
                     await db.flush()
                     
-            
                     
             elif item_type == "eliminar_cliente":
 
@@ -5188,14 +5193,22 @@ async def sync_batch(
 
                 if cliente:
 
-                    cliente.deleted_at = datetime.now(timezone.utc)
+                    siguiente_cursor = await obtener_siguiente_clientes_cursor(
+                        db,
+                        payload["empresa_uuid"]
+                    )
+
+                    ahora = datetime.now(timezone.utc)
+
+                    cliente.deleted_at = ahora
                     cliente.activo = False
                     cliente.sync_status = "synced"
                     cliente.version += 1
-                    cliente.updated_at = datetime.now(timezone.utc)
+                    cliente.sync_cursor = siguiente_cursor
+                    cliente.updated_at = ahora
 
                     await db.flush()
-                    
+        
             elif item_type == "crear_suplidor":
 
                 suplidor_id = UUID(
@@ -7809,15 +7822,12 @@ async def metodos_pago_changes(
        
 @app.get("/sync/clientes/changes")
 async def clientes_changes(
+    empresa_uuid: str,
+    cursor: int | None = None,
+    limit: int = 5000,
     authorization: str = Header(None),
-
-    empresa_uuid: str | None = None,
-    since: str | None = None,
-
     db: AsyncSession = Depends(get_db)
 ):
-
-
     token = authorization.replace(
         "Bearer ",
         ""
@@ -7838,59 +7848,120 @@ async def clientes_changes(
         Cliente.empresa_uuid == empresa_uuid
     )
 
-    if since:
-
-        since_dt = parser.isoparse(since)
-
-        since_dt = since_dt.replace(
-            tzinfo=None
-        )
-
+    if cursor is not None:
         query = query.where(
-            Cliente.updated_at > since_dt
+            Cliente.sync_cursor > cursor
         )
 
-    q = await db.execute(query)
+    query = query.order_by(
+        Cliente.sync_cursor.asc()
+    )
 
-    clientes = q.scalars().all()
+    query = query.limit(
+        limit
+    )
 
-    if not clientes:
-        return []
+    result = await db.execute(
+        query
+    )
 
-    return [
+    clientes = result.scalars().all()
+
+    print(
+        "SYNC CLIENTES:",
         {
-            "id": cliente.id,
-            "codigo": cliente.codigo,
-            "nombre": cliente.nombre,
-            "telefono": cliente.telefono,
-            "email": cliente.email,
-            "direccion": cliente.direccion,
-            "ciudad": cliente.ciudad,
-            "sector": cliente.sector,
-            "documento": cliente.documento,
-            "limite_credito": cliente.limite_credito,
-            "balance": cliente.balance,
-            "estado_credito": cliente.estado_credito,
-            "activo": cliente.activo,
-            "empresa_uuid": cliente.empresa_uuid,
-            "sync_status": cliente.sync_status,
-            "version": cliente.version,
-            "created_at":
-                cliente.created_at.isoformat()
-                if cliente.created_at
-                else None,
-            "updated_at":
-                cliente.updated_at.isoformat()
-                if cliente.updated_at
-                else None,
-            "deleted_at":
-                cliente.deleted_at.isoformat()
-                if cliente.deleted_at
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(clientes),
+            "primer_cursor": (
+                clientes[0].sync_cursor
+                if clientes
                 else None
+            ),
+            "ultimo_cursor": (
+                clientes[-1].sync_cursor
+                if clientes
+                else None
+            )
         }
-        for cliente in clientes
-    ]
+    )
 
+    return {
+        "items": [
+            {
+                "id":
+                    str(cliente.id),
+
+                "codigo":
+                    cliente.codigo,
+
+                "nombre":
+                    cliente.nombre,
+
+                "telefono":
+                    cliente.telefono,
+
+                "email":
+                    cliente.email,
+
+                "direccion":
+                    cliente.direccion,
+
+                "ciudad":
+                    cliente.ciudad,
+
+                "sector":
+                    cliente.sector,
+
+                "documento":
+                    cliente.documento,
+
+                "limite_credito":
+                    float(cliente.limite_credito or 0),
+
+                "balance":
+                    float(cliente.balance or 0),
+
+                "estado_credito":
+                    cliente.estado_credito,
+
+                "activo":
+                    cliente.activo,
+
+                "empresa_uuid":
+                    cliente.empresa_uuid,
+
+                "sync_status":
+                    cliente.sync_status,
+
+                "version":
+                    cliente.version,
+
+                "sync_cursor":
+                    cliente.sync_cursor,
+
+                "created_at":
+                    cliente.created_at.isoformat()
+                    if cliente.created_at
+                    else None,
+
+                "updated_at":
+                    cliente.updated_at.isoformat()
+                    if cliente.updated_at
+                    else None,
+
+                "deleted_at":
+                    cliente.deleted_at.isoformat()
+                    if cliente.deleted_at
+                    else None
+            }
+            for cliente in clientes
+        ],
+
+        "has_more":
+            len(clientes) == limit
+    }
+    
 @app.get("/sync/suplidores/changes")
 async def suplidores_changes(
     authorization: str = Header(None),
@@ -12342,6 +12413,123 @@ async def restore_compras_changes(
         "has_more":
             len(compras) == limit
     }
+
+@app.get("/restore/clientes/changes")
+async def restore_clientes_changes(
+    empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(Cliente)
+        .where(
+            Cliente.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            Cliente.sync_cursor.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    clientes = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id":
+                    str(cliente.id),
+
+                "codigo":
+                    cliente.codigo,
+
+                "nombre":
+                    cliente.nombre,
+
+                "telefono":
+                    cliente.telefono,
+
+                "email":
+                    cliente.email,
+
+                "direccion":
+                    cliente.direccion,
+
+                "ciudad":
+                    cliente.ciudad,
+
+                "sector":
+                    cliente.sector,
+
+                "documento":
+                    cliente.documento,
+
+                "limite_credito":
+                    float(cliente.limite_credito or 0),
+
+                "balance":
+                    float(cliente.balance or 0),
+
+                "estado_credito":
+                    cliente.estado_credito,
+
+                "activo":
+                    cliente.activo,
+
+                "empresa_uuid":
+                    cliente.empresa_uuid,
+
+                "sync_status":
+                    cliente.sync_status,
+
+                "version":
+                    cliente.version,
+
+                "sync_cursor":
+                    cliente.sync_cursor,
+
+                "deleted_at":
+                    cliente.deleted_at.isoformat()
+                    if cliente.deleted_at
+                    else None,
+
+                "updated_at":
+                    cliente.updated_at.isoformat()
+                    if cliente.updated_at
+                    else None,
+
+                "created_at":
+                    cliente.created_at.isoformat()
+                    if cliente.created_at
+                    else None
+            }
+            for cliente in clientes
+        ],
+
+        "has_more":
+            len(clientes) == limit
+    }
     
 @app.get("/restore/compras-detalles/changes")
 async def restore_compras_detalles_changes(
@@ -14321,6 +14509,83 @@ async def obtener_siguiente_devolucion_detalle_cursor(
         {
             "empresa_uuid": empresa_uuid,
             "devolucion_detalle_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
+    
+async def obtener_siguiente_clientes_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                clientes_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT clientes_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM clientes
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET clientes_cursor = :clientes_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING clientes_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "clientes_cursor": siguiente_cursor
         }
     )
 
