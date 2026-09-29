@@ -822,13 +822,6 @@ class Venta(Base):
         default=0,
         server_default=text("0")
     )
-    
-    monto_recibido: Mapped[Decimal] = mapped_column(
-        Numeric(12, 2),
-        nullable=False,
-        default=0,
-        server_default=text("0")
-    )
 
     monto_pendiente: Mapped[Decimal] = mapped_column(
         Numeric(12, 2),
