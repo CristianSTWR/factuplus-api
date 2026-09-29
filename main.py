@@ -2684,6 +2684,15 @@ async def sync_batch(
                                 )
                             )
                         ),
+                        
+                        monto_recibido=Decimal(
+                            str(
+                                payload.get(
+                                    "monto_recibido",
+                                    0
+                                )
+                            )
+                        ),
 
                         monto_pendiente=Decimal(
                             str(
@@ -6952,6 +6961,9 @@ async def ventas_changes(
                 "monto_pagado":
                     float(v.monto_pagado or 0),
 
+                "monto_recibido ":
+                    float(v.monto_recibido  or 0),
+                    
                 "monto_pendiente":
                     float(v.monto_pendiente or 0),
 
@@ -12183,6 +12195,9 @@ async def restore_ventas_changes(
                 "monto_pagado":
                     float(v.monto_pagado or 0),
 
+                "monto_recibido ":
+                    float(v.monto_recibido or 0),
+                    
                 "monto_pendiente":
                     float(v.monto_pendiente or 0),
 
