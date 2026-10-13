@@ -2341,6 +2341,11 @@ class Cotizacion(Base):
         PG_UUID(as_uuid=True),
         nullable=True
     )
+    
+    modificado_por: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=True
+    )
 
     fecha: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
