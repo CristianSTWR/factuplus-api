@@ -14977,11 +14977,13 @@ async def obtener_siguiente_cotizacion_detalles_cursor(
     db: AsyncSession,
     empresa_uuid: str
 ):
+    empresa_uuid = str(empresa_uuid)
+
     await db.execute(
         text("""
             INSERT INTO empresa_sync_counters (
                 empresa_uuid,
-                cotizaciones_detalles_cursor
+                cotizacion_detalles_cursor
             )
             VALUES (
                 :empresa_uuid,
@@ -14997,7 +14999,7 @@ async def obtener_siguiente_cotizacion_detalles_cursor(
 
     resultado = await db.execute(
         text("""
-            SELECT cotizaciones_detalles_cursor
+            SELECT cotizacion_detalles_cursor
             FROM empresa_sync_counters
             WHERE empresa_uuid = :empresa_uuid
             FOR UPDATE
@@ -15007,16 +15009,11 @@ async def obtener_siguiente_cotizacion_detalles_cursor(
         }
     )
 
-    cursor_actual = int(
-        resultado.scalar_one() or 0
-    )
+    cursor_actual = int(resultado.scalar_one() or 0)
 
     resultado_max = await db.execute(
         text("""
-            SELECT COALESCE(
-                MAX(cd.sync_cursor),
-                0
-            )
+            SELECT COALESCE(MAX(cd.sync_cursor), 0)
             FROM cotizacion_detalles cd
             INNER JOIN cotizaciones c
                 ON c.id = cd.cotizacion_id
@@ -15027,29 +15024,23 @@ async def obtener_siguiente_cotizacion_detalles_cursor(
         }
     )
 
-    max_cursor = int(
-        resultado_max.scalar_one() or 0
-    )
+    max_cursor = int(resultado_max.scalar_one() or 0)
 
-    siguiente_cursor = (
-        max(cursor_actual, max_cursor) + 1
-    )
+    siguiente_cursor = max(cursor_actual, max_cursor) + 1
 
     resultado_final = await db.execute(
         text("""
             UPDATE empresa_sync_counters
-            SET cotizaciones_detalles_cursor = :cotizaciones_detalles_cursor
+            SET cotizacion_detalles_cursor = :cursor
             WHERE empresa_uuid = :empresa_uuid
-            RETURNING cotizaciones_detalles_cursor
+            RETURNING cotizacion_detalles_cursor
         """),
         {
             "empresa_uuid": empresa_uuid,
-            "cotizaciones_detalles_cursor": siguiente_cursor
+            "cursor": siguiente_cursor
         }
     )
 
-    return int(
-        resultado_final.scalar_one()
-    )
+    return int(resultado_final.scalar_one())
 
 """  """
