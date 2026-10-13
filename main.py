@@ -14981,7 +14981,7 @@ async def obtener_siguiente_cotizacion_detalles_cursor(
         text("""
             INSERT INTO empresa_sync_counters (
                 empresa_uuid,
-                cotizacion_detalles_cursor
+                cotizaciones_detalles_cursor
             )
             VALUES (
                 :empresa_uuid,
@@ -14997,7 +14997,7 @@ async def obtener_siguiente_cotizacion_detalles_cursor(
 
     resultado = await db.execute(
         text("""
-            SELECT cotizacion_detalles_cursor
+            SELECT cotizaciones_detalles_cursor
             FROM empresa_sync_counters
             WHERE empresa_uuid = :empresa_uuid
             FOR UPDATE
@@ -15038,13 +15038,13 @@ async def obtener_siguiente_cotizacion_detalles_cursor(
     resultado_final = await db.execute(
         text("""
             UPDATE empresa_sync_counters
-            SET cotizacion_detalles_cursor = :cotizacion_detalles_cursor
+            SET cotizaciones_detalles_cursor = :cotizaciones_detalles_cursor
             WHERE empresa_uuid = :empresa_uuid
-            RETURNING cotizacion_detalles_cursor
+            RETURNING cotizaciones_detalles_cursor
         """),
         {
             "empresa_uuid": empresa_uuid,
-            "cotizacion_detalles_cursor": siguiente_cursor
+            "cotizaciones_detalles_cursor": siguiente_cursor
         }
     )
 
