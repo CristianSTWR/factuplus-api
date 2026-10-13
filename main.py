@@ -7461,6 +7461,7 @@ async def venta_detalles_changes(
         "has_more":
             len(detalles) == limit
     }
+
 @app.get("/sync/unidades_medida/changes")
 async def unidades_medida_changes(
     empresa_uuid: str,
@@ -7679,7 +7680,6 @@ async def roles_changes(
             len(roles) == limit
     }
     
-
 @app.get("/sync/usuario-roles/changes")
 async def usuario_roles_changes(
     empresa_uuid: str,
@@ -8816,6 +8816,298 @@ async def devolucion_detalles_changes(
 
         "has_more":
             len(detalles) == limit
+    }
+
+@app.get("/sync/cotizaciones/changes")
+async def cotizaciones_changes(
+    empresa_uuid: str,
+    cursor: int | None = None,
+    limit: int = 5000,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(Cotizacion).where(
+        Cotizacion.empresa_uuid == empresa_uuid
+    )
+
+    if cursor is not None:
+        query = query.where(
+            Cotizacion.sync_cursor > cursor
+        )
+
+    query = query.order_by(
+        Cotizacion.sync_cursor.asc()
+    )
+
+    query = query.limit(
+        limit
+    )
+
+    result = await db.execute(
+        query
+    )
+
+    cotizaciones = result.scalars().all()
+
+    print(
+        "SYNC COTIZACIONES:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(cotizaciones),
+            "primer_cursor": (
+                cotizaciones[0].sync_cursor
+                if cotizaciones
+                else None
+            ),
+            "ultimo_cursor": (
+                cotizaciones[-1].sync_cursor
+                if cotizaciones
+                else None
+            )
+        }
+    )
+
+    return {
+        "items": [
+            {
+                "id": str(c.id),
+
+                "empresa_uuid":
+                    c.empresa_uuid,
+
+                "cliente_id":
+                    str(c.cliente_id)
+                    if c.cliente_id
+                    else None,
+
+                "usuario_id":
+                    str(c.usuario_id)
+                    if c.usuario_id
+                    else None,
+
+                "modificado_por":
+                    str(c.modificado_por)
+                    if c.modificado_por
+                    else None,
+
+                "fecha":
+                    c.fecha.isoformat()
+                    if c.fecha
+                    else None,
+
+                "fecha_vencimiento":
+                    c.fecha_vencimiento.isoformat()
+                    if c.fecha_vencimiento
+                    else None,
+
+                "estado":
+                    c.estado,
+
+                "subtotal":
+                    float(c.subtotal or 0),
+
+                "descuento":
+                    float(c.descuento or 0),
+
+                "impuesto":
+                    float(c.impuesto or 0),
+
+                "total":
+                    float(c.total or 0),
+
+                "observaciones":
+                    c.observaciones,
+
+                "condiciones":
+                    c.condiciones,
+
+                "venta_id":
+                    str(c.venta_id)
+                    if c.venta_id
+                    else None,
+
+                "sync_status":
+                    c.sync_status,
+
+                "sync_cursor":
+                    c.sync_cursor,
+
+                "version":
+                    c.version,
+
+                "deleted_at":
+                    c.deleted_at.isoformat()
+                    if c.deleted_at
+                    else None,
+
+                "created_at":
+                    c.created_at.isoformat()
+                    if c.created_at
+                    else None,
+
+                "updated_at":
+                    c.updated_at.isoformat()
+                    if c.updated_at
+                    else None
+            }
+            for c in cotizaciones
+        ],
+
+        "has_more":
+            len(cotizaciones) == limit
+    }
+
+@app.get("/sync/cotizacion-detalles/changes")
+async def cotizacion_detalles_changes(
+    empresa_uuid: str,
+    cursor: int | None = None,
+    limit: int = 5000,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    token = authorization.replace(
+        "Bearer ",
+        ""
+    )
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = (
+        select(CotizacionDetalle)
+        .join(
+            Cotizacion,
+            Cotizacion.id == CotizacionDetalle.cotizacion_id
+        )
+        .where(
+            Cotizacion.empresa_uuid == empresa_uuid
+        )
+    )
+
+    if cursor is not None:
+        query = query.where(
+            CotizacionDetalle.sync_cursor > cursor
+        )
+
+    query = query.order_by(
+        CotizacionDetalle.sync_cursor.asc()
+    )
+
+    query = query.limit(limit)
+
+    result = await db.execute(query)
+
+    detalles = result.scalars().all()
+
+    print(
+        "SYNC COTIZACION DETALLES:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(detalles),
+            "primer_cursor": (
+                detalles[0].sync_cursor
+                if detalles
+                else None
+            ),
+            "ultimo_cursor": (
+                detalles[-1].sync_cursor
+                if detalles
+                else None
+            )
+        }
+    )
+
+    return {
+        "items": [
+            {
+                "id": str(d.id),
+
+                "cotizacion_id": str(
+                    d.cotizacion_id
+                ),
+
+                "producto_id": (
+                    str(d.producto_id)
+                    if d.producto_id
+                    else None
+                ),
+
+                "descripcion": d.descripcion,
+
+                "cantidad": float(
+                    d.cantidad or 0
+                ),
+
+                "precio": float(
+                    d.precio or 0
+                ),
+
+                "descuento": float(
+                    d.descuento or 0
+                ),
+
+                "impuesto": float(
+                    d.impuesto or 0
+                ),
+
+                "total": float(
+                    d.total or 0
+                ),
+
+                "sync_status": d.sync_status,
+
+                "version": d.version,
+
+                "sync_cursor": d.sync_cursor,
+
+                "deleted_at": (
+                    d.deleted_at.isoformat()
+                    if d.deleted_at
+                    else None
+                ),
+
+                "created_at": (
+                    d.created_at.isoformat()
+                    if d.created_at
+                    else None
+                ),
+
+                "updated_at": (
+                    d.updated_at.isoformat()
+                    if d.updated_at
+                    else None
+                )
+            }
+            for d in detalles
+        ],
+
+        "has_more": len(detalles) == limit
     }
 
 """ @app.post("/registrar-users")
