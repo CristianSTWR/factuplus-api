@@ -14964,11 +14964,13 @@ async def obtener_siguiente_cotizacion_detalles_cursor(
     resultado_max = await db.execute(
         text("""
             SELECT COALESCE(
-                MAX(sync_cursor),
+                MAX(cd.sync_cursor),
                 0
             )
-            FROM cotizacion_detalles
-            WHERE empresa_uuid = :empresa_uuid
+            FROM cotizacion_detalles AS cd
+            INNER JOIN cotizaciones AS c
+                ON c.id = cd.cotizacion_id
+            WHERE c.empresa_uuid = :empresa_uuid
         """),
         {
             "empresa_uuid": empresa_uuid
