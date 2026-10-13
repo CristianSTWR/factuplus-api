@@ -8818,6 +8818,8 @@ async def devolucion_detalles_changes(
             len(detalles) == limit
     }
 
+"""  """
+
 @app.get("/sync/cotizaciones/changes")
 async def cotizaciones_changes(
     empresa_uuid: str,
