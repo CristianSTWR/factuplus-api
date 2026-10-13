@@ -5966,19 +5966,15 @@ async def sync_batch(
                         )
                         
             elif item_type == "crear_cotizacion":
-
-                cotizacion_uuid = UUID(
-                    payload["id"]
-                )
-
-                empresa_uuid = payload.get(
-                    "empresa_uuid"
-                )
+                cotizacion_uuid = UUID(payload["id"])
+                empresa_uuid = payload.get("empresa_uuid")
 
                 if not empresa_uuid:
                     raise ValueError(
                         "La cotización no contiene empresa_uuid"
                     )
+
+                empresa_uuid = str(empresa_uuid)
 
                 q = await db.execute(
                     select(Cotizacion).where(
@@ -5987,10 +5983,9 @@ async def sync_batch(
                     )
                 )
 
-                exists = q.scalar_one_or_none()
+                cotizacion = q.scalar_one_or_none()
 
-                if not exists:
-
+                if not cotizacion:
                     sync_cursor = (
                         await obtener_siguiente_cotizaciones_cursor(
                             db,
@@ -6000,7 +5995,6 @@ async def sync_batch(
 
                     cotizacion = Cotizacion(
                         id=cotizacion_uuid,
-
                         empresa_uuid=empresa_uuid,
 
                         cliente_id=(
@@ -6027,38 +6021,13 @@ async def sync_batch(
                             else None
                         ),
 
-                        estado=payload.get(
-                            "estado",
-                            "borrador"
-                        ),
-
-                        subtotal=payload.get(
-                            "subtotal",
-                            0
-                        ),
-
-                        descuento=payload.get(
-                            "descuento",
-                            0
-                        ),
-
-                        impuesto=payload.get(
-                            "impuesto",
-                            0
-                        ),
-
-                        total=payload.get(
-                            "total",
-                            0
-                        ),
-
-                        observaciones=payload.get(
-                            "observaciones"
-                        ),
-
-                        condiciones=payload.get(
-                            "condiciones"
-                        ),
+                        estado=payload.get("estado", "borrador"),
+                        subtotal=payload.get("subtotal", 0),
+                        descuento=payload.get("descuento", 0),
+                        impuesto=payload.get("impuesto", 0),
+                        total=payload.get("total", 0),
+                        observaciones=payload.get("observaciones"),
+                        condiciones=payload.get("condiciones"),
 
                         venta_id=(
                             UUID(payload["venta_id"])
@@ -6066,18 +6035,8 @@ async def sync_batch(
                             else None
                         ),
 
-                        sync_status=payload.get(
-                            "sync_status",
-                            "synced"
-                        ),
-
-                        version=int(
-                            payload.get(
-                                "version",
-                                1
-                            )
-                        ),
-
+                        sync_status=payload.get("sync_status", "synced"),
+                        version=int(payload.get("version", 1)),
                         sync_cursor=sync_cursor,
 
                         deleted_at=(
@@ -6100,108 +6059,97 @@ async def sync_batch(
                     )
 
                     db.add(cotizacion)
+                    await db.flush()
 
-                    for detalle_payload in payload.get("productos", []):
+                for indice, detalle_payload in enumerate(
+                    payload.get("productos", [])
+                ):
+                    detalle_id = detalle_payload.get("detalle_id")
 
-                        detalle_uuid = (
-                            UUID(detalle_payload["detalle_id"])
-                            if detalle_payload.get("detalle_id")
+                    if detalle_id:
+                        detalle_uuid = UUID(detalle_id)
+                    else:
+                        from uuid import uuid5
+
+                        detalle_uuid = uuid5(
+                            cotizacion_uuid,
+                            f"detalle:{indice}"
+                        )
+
+                    q_detalle = await db.execute(
+                        select(CotizacionDetalle).where(
+                            CotizacionDetalle.id == detalle_uuid
+                        )
+                    )
+
+                    detalle_exists = q_detalle.scalar_one_or_none()
+
+                    if detalle_exists:
+                        continue
+
+                    sync_cursor_detalle = (
+                        await obtener_siguiente_cotizacion_detalles_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
+
+                    detalle = CotizacionDetalle(
+                        id=detalle_uuid,
+                        cotizacion_id=cotizacion_uuid,
+
+                        producto_id=(
+                            UUID(detalle_payload["producto_id"])
+                            if detalle_payload.get("producto_id")
                             else UUID(detalle_payload["id"])
                             if detalle_payload.get("id")
-                            else uuid4()
-                        )
+                            else None
+                        ),
 
-                        q_detalle = await db.execute(
-                            select(CotizacionDetalle).where(
-                                CotizacionDetalle.id == detalle_uuid
-                            )
-                        )
+                        descripcion=detalle_payload.get(
+                            "descripcion",
+                            detalle_payload.get("nombre", "")
+                        ),
 
-                        detalle_exists = q_detalle.scalar_one_or_none()
+                        cantidad=detalle_payload.get("cantidad", 1),
+                        precio=detalle_payload.get("precio", 0),
+                        descuento=detalle_payload.get("descuento", 0),
+                        impuesto=detalle_payload.get(
+                            "impuesto",
+                            detalle_payload.get("itbis", 0)
+                        ),
+                        total=detalle_payload.get("total", 0),
 
-                        if not detalle_exists:
+                        sync_status=detalle_payload.get(
+                            "sync_status",
+                            "synced"
+                        ),
 
-                            detalle = CotizacionDetalle(
-                                id=detalle_uuid,
+                        version=int(detalle_payload.get("version", 1)),
 
-                                cotizacion_id=cotizacion_uuid,
+                        deleted_at=(
+                            parse_datetime(detalle_payload["deleted_at"])
+                            if detalle_payload.get("deleted_at")
+                            else None
+                        ),
 
-                                producto_id=(
-                                    UUID(detalle_payload["producto_id"])
-                                    if detalle_payload.get("producto_id")
-                                    else None
-                                ),
+                        created_at=(
+                            parse_datetime(detalle_payload["created_at"])
+                            if detalle_payload.get("created_at")
+                            else None
+                        ),
 
-                                descripcion=detalle_payload.get(
-                                    "descripcion",
-                                    detalle_payload.get("nombre", "")
-                                ),
+                        updated_at=(
+                            parse_datetime(detalle_payload["updated_at"])
+                            if detalle_payload.get("updated_at")
+                            else None
+                        ),
 
-                                cantidad=detalle_payload.get(
-                                    "cantidad",
-                                    1
-                                ),
+                        sync_cursor=sync_cursor_detalle
+                    )
 
-                                precio=detalle_payload.get(
-                                    "precio",
-                                    0
-                                ),
-
-                                descuento=detalle_payload.get(
-                                    "descuento",
-                                    0
-                                ),
-
-                                impuesto=detalle_payload.get(
-                                    "impuesto",
-                                    0
-                                ),
-
-                                total=detalle_payload.get(
-                                    "total",
-                                    0
-                                ),
-
-                                sync_status=detalle_payload.get(
-                                    "sync_status",
-                                    "synced"
-                                ),
-
-                                version=int(
-                                    detalle_payload.get(
-                                        "version",
-                                        1
-                                    )
-                                ),
-
-                                deleted_at=(
-                                    parse_datetime(detalle_payload["deleted_at"])
-                                    if detalle_payload.get("deleted_at")
-                                    else None
-                                ),
-
-                                created_at=(
-                                    parse_datetime(detalle_payload["created_at"])
-                                    if detalle_payload.get("created_at")
-                                    else None
-                                ),
-
-                                updated_at=(
-                                    parse_datetime(detalle_payload["updated_at"])
-                                    if detalle_payload.get("updated_at")
-                                    else None
-                                ),
-
-                                sync_cursor=(
-                                    await obtener_siguiente_cotizacion_detalles_cursor(
-                                        db,
-                                        cotizacion_uuid
-                                    )
-                                )
-                            )
-
-                            db.add(detalle)
-                    
+                    db.add(detalle)
+            
             """ elif item_type == "create_producto":
 
                 q = await db.execute(
@@ -14896,6 +14844,7 @@ async def obtener_siguiente_clientes_cursor(
         resultado_final.scalar_one()
     )
     
+
 async def obtener_siguiente_cotizaciones_cursor(
     db: AsyncSession,
     empresa_uuid: str
@@ -14959,26 +14908,25 @@ async def obtener_siguiente_cotizaciones_cursor(
     resultado_final = await db.execute(
         text("""
             UPDATE empresa_sync_counters
-            SET cotizaciones_cursor = :cotizaciones_cursor
+            SET cotizaciones_cursor = :cursor
             WHERE empresa_uuid = :empresa_uuid
             RETURNING cotizaciones_cursor
         """),
         {
             "empresa_uuid": empresa_uuid,
-            "cotizaciones_cursor": siguiente_cursor
+            "cursor": siguiente_cursor
         }
     )
 
     return int(
         resultado_final.scalar_one()
     )
-    
+
+
 async def obtener_siguiente_cotizacion_detalles_cursor(
     db: AsyncSession,
     empresa_uuid: str
 ):
-    empresa_uuid = str(empresa_uuid)
-
     await db.execute(
         text("""
             INSERT INTO empresa_sync_counters (
@@ -15009,24 +14957,31 @@ async def obtener_siguiente_cotizacion_detalles_cursor(
         }
     )
 
-    cursor_actual = int(resultado.scalar_one() or 0)
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
 
     resultado_max = await db.execute(
         text("""
-            SELECT COALESCE(MAX(cd.sync_cursor), 0)
-            FROM cotizacion_detalles cd
-            INNER JOIN cotizaciones c
-                ON c.id = cd.cotizacion_id
-            WHERE c.empresa_uuid = :empresa_uuid
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM cotizacion_detalles
+            WHERE empresa_uuid = :empresa_uuid
         """),
         {
             "empresa_uuid": empresa_uuid
         }
     )
 
-    max_cursor = int(resultado_max.scalar_one() or 0)
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
 
-    siguiente_cursor = max(cursor_actual, max_cursor) + 1
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
 
     resultado_final = await db.execute(
         text("""
@@ -15041,6 +14996,9 @@ async def obtener_siguiente_cotizacion_detalles_cursor(
         }
     )
 
-    return int(resultado_final.scalar_one())
+    return int(
+        resultado_final.scalar_one()
+    )
+    
 
 """  """
