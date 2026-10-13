@@ -6150,6 +6150,310 @@ async def sync_batch(
 
                     db.add(detalle)
             
+            elif item_type == "actualizar_cotizacion":
+
+                cotizacion_id = UUID(
+                    payload["id"]
+                )
+
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "La cotización no contiene empresa_uuid"
+                    )
+
+                q = await db.execute(
+                    select(Cotizacion).where(
+                        Cotizacion.id == cotizacion_id,
+                        Cotizacion.empresa_uuid == empresa_uuid
+                    )
+                )
+
+                cotizacion = q.scalar_one_or_none()
+
+                if not cotizacion:
+                    raise ValueError(
+                        "No existe la cotización que se desea actualizar"
+                    )
+
+                sync_cursor = (
+                    await obtener_siguiente_cotizaciones_cursor(
+                        db,
+                        empresa_uuid
+                    )
+                )
+
+                cotizacion.cliente_id = (
+                    UUID(payload["cliente_id"])
+                    if payload.get("cliente_id")
+                    else None
+                )
+
+                cotizacion.usuario_id = (
+                    UUID(payload["usuario_id"])
+                    if payload.get("usuario_id")
+                    else None
+                )
+
+                cotizacion.modificado_por = (
+                    UUID(payload["modificado_por"])
+                    if payload.get("modificado_por")
+                    else None
+                )
+
+                cotizacion.fecha = (
+                    parse_datetime(payload["fecha"])
+                    if payload.get("fecha")
+                    else None
+                )
+
+                cotizacion.fecha_vencimiento = (
+                    parse_datetime(payload["fecha_vencimiento"])
+                    if payload.get("fecha_vencimiento")
+                    else None
+                )
+
+                cotizacion.estado = payload.get(
+                    "estado",
+                    cotizacion.estado
+                )
+
+                cotizacion.subtotal = payload.get(
+                    "subtotal",
+                    cotizacion.subtotal
+                )
+
+                cotizacion.descuento = payload.get(
+                    "descuento",
+                    cotizacion.descuento
+                )
+
+                cotizacion.impuesto = payload.get(
+                    "impuesto",
+                    cotizacion.impuesto
+                )
+
+                cotizacion.total = payload.get(
+                    "total",
+                    cotizacion.total
+                )
+
+                cotizacion.observaciones = payload.get(
+                    "observaciones"
+                )
+
+                cotizacion.condiciones = payload.get(
+                    "condiciones"
+                )
+
+                cotizacion.venta_id = (
+                    UUID(payload["venta_id"])
+                    if payload.get("venta_id")
+                    else None
+                )
+
+                cotizacion.updated_at = (
+                    parse_datetime(payload["updated_at"])
+                    if payload.get("updated_at")
+                    else datetime.now(timezone.utc)
+                )
+
+                cotizacion.deleted_at = (
+                    parse_datetime(payload["deleted_at"])
+                    if payload.get("deleted_at")
+                    else None
+                )
+
+                cotizacion.sync_status = "synced"
+
+                cotizacion.version = int(
+                    payload.get(
+                        "version",
+                        (cotizacion.version or 1) + 1
+                    )
+                )
+
+                cotizacion.sync_cursor = sync_cursor
+
+                await db.flush()
+
+                detalles_recibidos = payload.get(
+                    "detalles",
+                    []
+                )
+
+                ids_detalles_recibidos = set()
+
+                for detalle in detalles_recibidos:
+
+                    detalle_id = UUID(
+                        detalle["id"]
+                    )
+
+                    ids_detalles_recibidos.add(
+                        detalle_id
+                    )
+
+                    q_detalle = await db.execute(
+                        select(CotizacionDetalle).where(
+                            CotizacionDetalle.id == detalle_id
+                        ).with_for_update()
+                    )
+
+                    cotizacion_detalle = (
+                        q_detalle.scalar_one_or_none()
+                    )
+
+                    if cotizacion_detalle:
+
+                        if cotizacion_detalle.cotizacion_id != cotizacion_id:
+                            raise ValueError(
+                                "El detalle no pertenece a la cotización indicada"
+                            )
+
+                        detalle_sync_cursor = (
+                            await obtener_siguiente_cotizacion_detalles_cursor(
+                                db,
+                                empresa_uuid
+                            )
+                        )
+
+                        cotizacion_detalle.producto_id = (
+                            UUID(detalle["producto_id"])
+                            if detalle.get("producto_id")
+                            else None
+                        )
+
+                        cotizacion_detalle.descripcion = detalle.get(
+                            "descripcion",
+                            cotizacion_detalle.descripcion
+                        )
+
+                        cotizacion_detalle.cantidad = detalle.get(
+                            "cantidad",
+                            cotizacion_detalle.cantidad
+                        )
+
+                        cotizacion_detalle.precio = detalle.get(
+                            "precio",
+                            cotizacion_detalle.precio
+                        )
+
+                        cotizacion_detalle.descuento = detalle.get(
+                            "descuento",
+                            cotizacion_detalle.descuento
+                        )
+
+                        cotizacion_detalle.impuesto = detalle.get(
+                            "impuesto",
+                            cotizacion_detalle.impuesto
+                        )
+
+                        cotizacion_detalle.total = detalle.get(
+                            "total",
+                            cotizacion_detalle.total
+                        )
+
+                        cotizacion_detalle.updated_at = (
+                            parse_datetime(detalle["updated_at"])
+                            if detalle.get("updated_at")
+                            else datetime.now(timezone.utc)
+                        )
+
+                        cotizacion_detalle.deleted_at = (
+                            parse_datetime(detalle["deleted_at"])
+                            if detalle.get("deleted_at")
+                            else None
+                        )
+
+                        cotizacion_detalle.sync_status = "synced"
+
+                        cotizacion_detalle.version = int(
+                            detalle.get(
+                                "version",
+                                (cotizacion_detalle.version or 1) + 1
+                            )
+                        )
+
+                        cotizacion_detalle.sync_cursor = (
+                            detalle_sync_cursor
+                        )
+
+                    else:
+
+                        detalle_sync_cursor = (
+                            await obtener_siguiente_cotizacion_detalles_cursor(
+                                db,
+                                empresa_uuid
+                            )
+                        )
+
+                        cotizacion_detalle = CotizacionDetalle(
+                            id=detalle_id,
+                            cotizacion_id=cotizacion_id,
+                            producto_id=(
+                                UUID(detalle["producto_id"])
+                                if detalle.get("producto_id")
+                                else None
+                            ),
+                            descripcion=detalle.get(
+                                "descripcion",
+                                ""
+                            ),
+                            cantidad=detalle.get(
+                                "cantidad",
+                                0
+                            ),
+                            precio=detalle.get(
+                                "precio",
+                                0
+                            ),
+                            descuento=detalle.get(
+                                "descuento",
+                                0
+                            ),
+                            impuesto=detalle.get(
+                                "impuesto",
+                                0
+                            ),
+                            total=detalle.get(
+                                "total",
+                                0
+                            ),
+                            created_at=(
+                                parse_datetime(detalle["created_at"])
+                                if detalle.get("created_at")
+                                else datetime.now(timezone.utc)
+                            ),
+                            updated_at=(
+                                parse_datetime(detalle["updated_at"])
+                                if detalle.get("updated_at")
+                                else datetime.now(timezone.utc)
+                            ),
+                            deleted_at=(
+                                parse_datetime(detalle["deleted_at"])
+                                if detalle.get("deleted_at")
+                                else None
+                            ),
+                            sync_status="synced",
+                            version=int(
+                                detalle.get(
+                                    "version",
+                                    1
+                                )
+                            ),
+                            sync_cursor=detalle_sync_cursor
+                        )
+
+                        db.add(
+                            cotizacion_detalle
+                        )
+
+                    await db.flush()
+            
             """ elif item_type == "create_producto":
 
                 q = await db.execute(
