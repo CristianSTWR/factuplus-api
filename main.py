@@ -9354,6 +9354,8 @@ async def cotizacion_detalles_changes(
         "items": [
             {
                 "id": str(d.id),
+                
+                "empresa_uuid": str(d.empresa_uuid),
 
                 "cotizacion_id": str(
                     d.cotizacion_id
