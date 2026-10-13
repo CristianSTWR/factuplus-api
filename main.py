@@ -75,7 +75,7 @@ import httpx
 import re
 # APLICACION
 from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, Producto, UnidadMedida, Rol, RolPermiso, UsuarioRol, MetodoPago, Cliente, Suplidor
-from models import Compra, CompraDetalle, VentaDetalle, Pago, HistorialStock, Devolucion, DevolucionDetalle
+from models import Compra, CompraDetalle, VentaDetalle, Pago, HistorialStock, Devolucion, DevolucionDetalle, Cotizacion, CotizacionDetalle
 
 # WEB
 from models import ListaEspera, EmpresaDispositivo
@@ -2036,6 +2036,7 @@ async def sync_batch(
                 "producto_sumarstock": 14,
                 "producto_reducirstock": 15,
                 "pago_actualizar": 16,
+                "crear_cotizacion": 17,
             }.get(x["type"], 999)
         )
                 
@@ -5652,6 +5653,7 @@ async def sync_batch(
                     await db.refresh(
                         metodo_pago
                     )
+                    
             elif item_type == "crear_devolucion":
 
                 devolucion_id = UUID(
@@ -5962,6 +5964,243 @@ async def sync_batch(
                         db.add(
                             detalle
                         )
+                        
+            elif item_type == "crear_cotizacion":
+
+                cotizacion_uuid = UUID(
+                    payload["id"]
+                )
+
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "La cotización no contiene empresa_uuid"
+                    )
+
+                q = await db.execute(
+                    select(Cotizacion).where(
+                        Cotizacion.id == cotizacion_uuid,
+                        Cotizacion.empresa_uuid == empresa_uuid
+                    )
+                )
+
+                exists = q.scalar_one_or_none()
+
+                if not exists:
+
+                    sync_cursor = (
+                        await obtener_siguiente_cotizaciones_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
+
+                    cotizacion = Cotizacion(
+                        id=cotizacion_uuid,
+
+                        empresa_uuid=empresa_uuid,
+
+                        cliente_id=(
+                            UUID(payload["cliente_id"])
+                            if payload.get("cliente_id")
+                            else None
+                        ),
+
+                        usuario_id=(
+                            UUID(payload["usuario_id"])
+                            if payload.get("usuario_id")
+                            else None
+                        ),
+
+                        fecha=(
+                            parse_datetime(payload["fecha"])
+                            if payload.get("fecha")
+                            else None
+                        ),
+
+                        fecha_vencimiento=(
+                            parse_datetime(payload["fecha_vencimiento"])
+                            if payload.get("fecha_vencimiento")
+                            else None
+                        ),
+
+                        estado=payload.get(
+                            "estado",
+                            "borrador"
+                        ),
+
+                        subtotal=payload.get(
+                            "subtotal",
+                            0
+                        ),
+
+                        descuento=payload.get(
+                            "descuento",
+                            0
+                        ),
+
+                        impuesto=payload.get(
+                            "impuesto",
+                            0
+                        ),
+
+                        total=payload.get(
+                            "total",
+                            0
+                        ),
+
+                        observaciones=payload.get(
+                            "observaciones"
+                        ),
+
+                        condiciones=payload.get(
+                            "condiciones"
+                        ),
+
+                        venta_id=(
+                            UUID(payload["venta_id"])
+                            if payload.get("venta_id")
+                            else None
+                        ),
+
+                        sync_status=payload.get(
+                            "sync_status",
+                            "synced"
+                        ),
+
+                        version=int(
+                            payload.get(
+                                "version",
+                                1
+                            )
+                        ),
+
+                        sync_cursor=sync_cursor,
+
+                        deleted_at=(
+                            parse_datetime(payload["deleted_at"])
+                            if payload.get("deleted_at")
+                            else None
+                        ),
+
+                        created_at=(
+                            parse_datetime(payload["created_at"])
+                            if payload.get("created_at")
+                            else None
+                        ),
+
+                        updated_at=(
+                            parse_datetime(payload["updated_at"])
+                            if payload.get("updated_at")
+                            else None
+                        )
+                    )
+
+                    db.add(cotizacion)
+
+                    for detalle_payload in payload.get("productos", []):
+
+                        detalle_uuid = (
+                            UUID(detalle_payload["detalle_id"])
+                            if detalle_payload.get("detalle_id")
+                            else UUID(detalle_payload["id"])
+                            if detalle_payload.get("id")
+                            else uuid4()
+                        )
+
+                        q_detalle = await db.execute(
+                            select(CotizacionDetalle).where(
+                                CotizacionDetalle.id == detalle_uuid
+                            )
+                        )
+
+                        detalle_exists = q_detalle.scalar_one_or_none()
+
+                        if not detalle_exists:
+
+                            detalle = CotizacionDetalle(
+                                id=detalle_uuid,
+
+                                cotizacion_id=cotizacion_uuid,
+
+                                producto_id=(
+                                    UUID(detalle_payload["producto_id"])
+                                    if detalle_payload.get("producto_id")
+                                    else None
+                                ),
+
+                                descripcion=detalle_payload.get(
+                                    "descripcion",
+                                    detalle_payload.get("nombre", "")
+                                ),
+
+                                cantidad=detalle_payload.get(
+                                    "cantidad",
+                                    1
+                                ),
+
+                                precio=detalle_payload.get(
+                                    "precio",
+                                    0
+                                ),
+
+                                descuento=detalle_payload.get(
+                                    "descuento",
+                                    0
+                                ),
+
+                                impuesto=detalle_payload.get(
+                                    "impuesto",
+                                    0
+                                ),
+
+                                total=detalle_payload.get(
+                                    "total",
+                                    0
+                                ),
+
+                                sync_status=detalle_payload.get(
+                                    "sync_status",
+                                    "synced"
+                                ),
+
+                                version=int(
+                                    detalle_payload.get(
+                                        "version",
+                                        1
+                                    )
+                                ),
+
+                                deleted_at=(
+                                    parse_datetime(detalle_payload["deleted_at"])
+                                    if detalle_payload.get("deleted_at")
+                                    else None
+                                ),
+
+                                created_at=(
+                                    parse_datetime(detalle_payload["created_at"])
+                                    if detalle_payload.get("created_at")
+                                    else None
+                                ),
+
+                                updated_at=(
+                                    parse_datetime(detalle_payload["updated_at"])
+                                    if detalle_payload.get("updated_at")
+                                    else None
+                                ),
+
+                                sync_cursor=(
+                                    await obtener_siguiente_cotizacion_detalles_cursor(
+                                        db,
+                                        cotizacion_uuid
+                                    )
+                                )
+                            )
+
+                            db.add(detalle)
                     
             """ elif item_type == "create_producto":
 
@@ -13146,6 +13385,70 @@ async def generate_token_tmp(body: TokenTmpRequest):
         "token_tmp": token_tmp
     }
     
+@app.get("/cotizacion/{empresa_uuid}/{cotizacion_id}")
+async def abrir_cotizacion_publica(
+    empresa_uuid: str,
+    cotizacion_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(Cotizacion).where(
+        Cotizacion.id == cotizacion_id,
+        Cotizacion.empresa_uuid == empresa_uuid,
+        Cotizacion.deleted_at.is_(None),
+        Cotizacion.estado.notin_(["borrador", "cancelada"]),
+    )
+
+    resultado = await db.execute(query)
+    cotizacion = resultado.scalar_one_or_none()
+
+    if not cotizacion:
+        raise HTTPException(
+            status_code=404,
+            detail="Cotización no encontrada o no disponible",
+        )
+
+    query_detalles = select(CotizacionDetalle).where(
+        CotizacionDetalle.cotizacion_id == cotizacion.id,
+        CotizacionDetalle.deleted_at.is_(None),
+    )
+
+    resultado_detalles = await db.execute(query_detalles)
+    detalles = resultado_detalles.scalars().all()
+
+    return {
+        "ok": True,
+        "cotizacion": {
+            "id": str(cotizacion.id),
+            "empresa_uuid": cotizacion.empresa_uuid,
+            "cliente_id": str(cotizacion.cliente_id) if cotizacion.cliente_id else None,
+            "fecha": cotizacion.fecha.isoformat() if cotizacion.fecha else None,
+            "fecha_vencimiento": (
+                cotizacion.fecha_vencimiento.isoformat()
+                if cotizacion.fecha_vencimiento else None
+            ),
+            "estado": cotizacion.estado,
+            "subtotal": str(cotizacion.subtotal),
+            "descuento": str(cotizacion.descuento),
+            "impuesto": str(cotizacion.impuesto),
+            "total": str(cotizacion.total),
+            "observaciones": cotizacion.observaciones,
+            "condiciones": cotizacion.condiciones,
+        },
+        "productos": [
+            {
+                "id": str(detalle.id),
+                "producto_id": str(detalle.producto_id) if detalle.producto_id else None,
+                "descripcion": detalle.descripcion,
+                "cantidad": str(detalle.cantidad),
+                "precio": str(detalle.precio),
+                "descuento": str(detalle.descuento),
+                "impuesto": str(detalle.impuesto),
+                "total": str(detalle.total),
+            }
+            for detalle in detalles
+        ],
+    }
+
 """ WEBSCOKER """
 clientes_ws = {}
 
@@ -14586,6 +14889,162 @@ async def obtener_siguiente_clientes_cursor(
         {
             "empresa_uuid": empresa_uuid,
             "clientes_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
+    
+async def obtener_siguiente_cotizaciones_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                cotizaciones_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT cotizaciones_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM cotizaciones
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET cotizaciones_cursor = :cotizaciones_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING cotizaciones_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "cotizaciones_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
+    
+async def obtener_siguiente_cotizacion_detalles_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                cotizacion_detalles_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT cotizacion_detalles_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(cd.sync_cursor),
+                0
+            )
+            FROM cotizacion_detalles cd
+            INNER JOIN cotizaciones c
+                ON c.id = cd.cotizacion_id
+            WHERE c.empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET cotizacion_detalles_cursor = :cotizacion_detalles_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING cotizacion_detalles_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "cotizacion_detalles_cursor": siguiente_cursor
         }
     )
 
