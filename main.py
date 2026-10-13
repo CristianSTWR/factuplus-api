@@ -6097,6 +6097,7 @@ async def sync_batch(
                     detalle = CotizacionDetalle(
                         id=detalle_uuid,
                         cotizacion_id=cotizacion_uuid,
+                        empresa_uuid=empresa_uuid,
 
                         producto_id=(
                             UUID(detalle_payload["producto_id"])

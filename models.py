@@ -2455,6 +2455,12 @@ class CotizacionDetalle(Base):
         default=uuid4,
         index=True
     )
+    
+    empresa_uuid: Mapped[str] = mapped_column(
+        String(36),
+        nullable=False,
+        index=True
+    )
 
     cotizacion_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
