@@ -9902,6 +9902,132 @@ async def cotizacion_detalles_changes(
         "has_more": len(detalles) == limit
     }
 
+@app.get("/sync/descuentos/changes")
+async def descuentos_changes(
+    empresa_uuid: str,
+    cursor: int | None = None,
+    descuento_id: UUID | None = None,
+    limit: int = 5000,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token = authorization.split(" ", 1)[1].strip()
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if str(usuario_actual.empresa_uuid) != str(empresa_uuid):
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(Descuento).where(
+        Descuento.empresa_uuid == empresa_uuid
+    )
+
+    if descuento_id is not None:
+        query = query.where(
+            Descuento.id == descuento_id
+        )
+    elif cursor is not None:
+        query = query.where(
+            Descuento.sync_cursor > cursor
+        )
+
+    query = query.order_by(
+        Descuento.sync_cursor.asc()
+    ).limit(limit)
+
+    result = await db.execute(query)
+
+    descuentos = result.scalars().all()
+
+    print(
+        "SYNC DESCUENTOS:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "descuento_id": str(descuento_id) if descuento_id else None,
+            "cursor_recibido": cursor,
+            "cantidad": len(descuentos),
+            "primer_cursor": (
+                descuentos[0].sync_cursor
+                if descuentos
+                else None
+            ),
+            "ultimo_cursor": (
+                descuentos[-1].sync_cursor
+                if descuentos
+                else None
+            )
+        }
+    )
+
+    return {
+        "items": [
+            {
+                "id": str(d.id),
+                "empresa_uuid": d.empresa_uuid,
+                "nombre": d.nombre,
+                "tipo": d.tipo,
+                "valor": float(d.valor or 0),
+                "aplicar_a": d.aplicar_a,
+                "usar_condiciones": d.usar_condiciones,
+                "operador_condiciones": d.operador_condiciones,
+                "fecha_inicio": (
+                    d.fecha_inicio.isoformat()
+                    if d.fecha_inicio
+                    else None
+                ),
+                "fecha_fin": (
+                    d.fecha_fin.isoformat()
+                    if d.fecha_fin
+                    else None
+                ),
+                "activo": d.activo,
+                "usar_producto_beneficiario": d.usar_producto_beneficiario,
+                "aplicar_a_todas_unidades_beneficiario": (
+                    d.aplicar_a_todas_unidades_beneficiario
+                ),
+                "beneficiario_tipo": d.beneficiario_tipo,
+                "beneficiario_valor": (
+                    float(d.beneficiario_valor)
+                    if d.beneficiario_valor is not None
+                    else None
+                ),
+                "se_repite": d.se_repite,
+                "sync_status": d.sync_status,
+                "sync_cursor": d.sync_cursor,
+                "version": d.version,
+                "deleted_at": (
+                    d.deleted_at.isoformat()
+                    if d.deleted_at
+                    else None
+                ),
+                "created_at": (
+                    d.created_at.isoformat()
+                    if d.created_at
+                    else None
+                ),
+                "updated_at": (
+                    d.updated_at.isoformat()
+                    if d.updated_at
+                    else None
+                )
+            }
+            for d in descuentos
+        ],
+        "has_more": len(descuentos) == limit
+    }
+    
 """ @app.post("/registrar-users")
 async def register_user(
     payload: dict,
@@ -14567,6 +14693,128 @@ async def restore_cotizacion_detalles_changes(
         ],
         "has_more": len(detalles) == limit
     }
+  
+
+@app.get("/restore/descuentos/changes")
+async def restore_descuentos_changes(
+    empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.split(
+        " ",
+        1
+    )[1].strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(Descuento)
+        .where(
+            Descuento.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            Descuento.sync_cursor.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    descuentos = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(d.id),
+
+                "empresa_uuid": d.empresa_uuid,
+
+                "nombre": d.nombre,
+
+                "tipo": d.tipo,
+
+                "valor": float(d.valor or 0),
+
+                "aplicar_a": d.aplicar_a,
+
+                "usar_condiciones": d.usar_condiciones,
+
+                "operador_condiciones": d.operador_condiciones,
+
+                "fecha_inicio": (
+                    d.fecha_inicio.isoformat()
+                    if d.fecha_inicio
+                    else None
+                ),
+
+                "fecha_fin": (
+                    d.fecha_fin.isoformat()
+                    if d.fecha_fin
+                    else None
+                ),
+
+                "activo": d.activo,
+
+                "usar_producto_beneficiario": (
+                    d.usar_producto_beneficiario
+                ),
+
+                "aplicar_a_todas_unidades_beneficiario": (
+                    d.aplicar_a_todas_unidades_beneficiario
+                ),
+
+                "beneficiario_tipo": d.beneficiario_tipo,
+
+                "beneficiario_valor": (
+                    float(d.beneficiario_valor)
+                    if d.beneficiario_valor is not None
+                    else None
+                ),
+
+                "se_repite": d.se_repite,
+
+                "sync_status": d.sync_status,
+
+                "sync_cursor": d.sync_cursor,
+
+                "version": d.version,
+
+                "deleted_at": (
+                    d.deleted_at.isoformat()
+                    if d.deleted_at
+                    else None
+                ),
+
+                "created_at": (
+                    d.created_at.isoformat()
+                    if d.created_at
+                    else None
+                ),
+
+                "updated_at": (
+                    d.updated_at.isoformat()
+                    if d.updated_at
+                    else None
+                )
+            }
+            for d in descuentos
+        ],
+
+        "has_more": len(descuentos) == limit
+    }  
     
 from pydantic import BaseModel
 
