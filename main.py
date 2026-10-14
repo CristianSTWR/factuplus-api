@@ -10436,6 +10436,135 @@ async def descuento_condiciones_changes(
         "has_more": len(condiciones) == limite
     }
 
+@app.get("/sync/descuento-clientes/changes")
+async def descuento_clientes_changes(
+    empresa_uuid: str,
+    cursor: int | None = None,
+    descuento_cliente_id: UUID | None = None,
+    descuento_id: UUID | None = None,
+    limit: int = 5000,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token = authorization.split(
+        " ",
+        1
+    )[1].strip()
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if str(usuario_actual.empresa_uuid) != str(empresa_uuid):
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    limite = max(1, min(limit, 5000))
+
+    query = select(DescuentoCliente).where(
+        DescuentoCliente.empresa_uuid == empresa_uuid
+    )
+
+    if descuento_cliente_id is not None:
+        query = query.where(
+            DescuentoCliente.id == descuento_cliente_id
+        )
+    elif descuento_id is not None:
+        query = query.where(
+            DescuentoCliente.descuento_id == descuento_id
+        )
+    elif cursor is not None:
+        query = query.where(
+            DescuentoCliente.sync_cursor > cursor
+        )
+
+    query = query.order_by(
+        DescuentoCliente.sync_cursor.asc()
+    ).limit(limite)
+
+    result = await db.execute(query)
+
+    relaciones = result.scalars().all()
+
+    print(
+        "SYNC DESCUENTO CLIENTES:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "descuento_cliente_id": (
+                str(descuento_cliente_id)
+                if descuento_cliente_id
+                else None
+            ),
+            "descuento_id": (
+                str(descuento_id)
+                if descuento_id
+                else None
+            ),
+            "cursor_recibido": cursor,
+            "cantidad": len(relaciones),
+            "primer_cursor": (
+                relaciones[0].sync_cursor
+                if relaciones
+                else None
+            ),
+            "ultimo_cursor": (
+                relaciones[-1].sync_cursor
+                if relaciones
+                else None
+            )
+        }
+    )
+
+    return {
+        "items": [
+            {
+                "id": str(r.id),
+
+                "empresa_uuid": r.empresa_uuid,
+
+                "descuento_id": str(r.descuento_id),
+
+                "cliente_id": str(r.cliente_id),
+
+                "sync_status": r.sync_status,
+
+                "sync_cursor": r.sync_cursor,
+
+                "version": r.version,
+
+                "deleted_at": (
+                    r.deleted_at.isoformat()
+                    if r.deleted_at
+                    else None
+                ),
+
+                "created_at": (
+                    r.created_at.isoformat()
+                    if r.created_at
+                    else None
+                ),
+
+                "updated_at": (
+                    r.updated_at.isoformat()
+                    if r.updated_at
+                    else None
+                )
+            }
+            for r in relaciones
+        ],
+
+        "has_more": len(relaciones) == limite
+    }
+
 """ @app.post("/registrar-users")
 async def register_user(
     payload: dict,
@@ -15501,6 +15630,87 @@ async def restore_descuento_condiciones_changes(
         ],
 
         "has_more": len(condiciones) == limit
+    }
+
+@app.get("/restore/descuento-clientes/changes")
+async def restore_descuento_clientes_changes(
+    empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.split(
+        " ",
+        1
+    )[1].strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(DescuentoCliente)
+        .where(
+            DescuentoCliente.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            DescuentoCliente.sync_cursor.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    relaciones = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(r.id),
+
+                "empresa_uuid": r.empresa_uuid,
+
+                "descuento_id": str(r.descuento_id),
+
+                "cliente_id": str(r.cliente_id),
+
+                "sync_status": r.sync_status,
+
+                "sync_cursor": r.sync_cursor,
+
+                "version": r.version,
+
+                "deleted_at": (
+                    r.deleted_at.isoformat()
+                    if r.deleted_at
+                    else None
+                ),
+
+                "created_at": (
+                    r.created_at.isoformat()
+                    if r.created_at
+                    else None
+                ),
+
+                "updated_at": (
+                    r.updated_at.isoformat()
+                    if r.updated_at
+                    else None
+                )
+            }
+            for r in relaciones
+        ],
+
+        "has_more": len(relaciones) == limit
     }
 
 from pydantic import BaseModel
