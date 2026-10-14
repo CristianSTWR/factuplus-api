@@ -10157,6 +10157,120 @@ async def descuento_productos_changes(
         )
     }
 
+@app.get("/sync/descuento-dias/changes")
+async def descuento_dias_changes(
+    empresa_uuid: str,
+    cursor: int | None = None,
+    descuento_id: UUID | None = None,
+    limit: int = 5000,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token = authorization.split(" ", 1)[1].strip()
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if str(usuario_actual.empresa_uuid) != str(empresa_uuid):
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(DescuentoDia).where(
+        DescuentoDia.empresa_uuid == empresa_uuid
+    )
+
+    if descuento_id is not None:
+        query = query.where(
+            DescuentoDia.descuento_id == descuento_id
+        )
+    elif cursor is not None:
+        query = query.where(
+            DescuentoDia.sync_cursor > cursor
+        )
+
+    query = query.order_by(
+        DescuentoDia.sync_cursor.asc()
+    ).limit(limit)
+
+    result = await db.execute(query)
+
+    dias = result.scalars().all()
+
+    print(
+        "SYNC DESCUENTO DIAS:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "descuento_id": (
+                str(descuento_id)
+                if descuento_id
+                else None
+            ),
+            "cursor_recibido": cursor,
+            "cantidad": len(dias),
+            "primer_cursor": (
+                dias[0].sync_cursor
+                if dias
+                else None
+            ),
+            "ultimo_cursor": (
+                dias[-1].sync_cursor
+                if dias
+                else None
+            )
+        }
+    )
+
+    return {
+        "items": [
+            {
+                "id": str(d.id),
+
+                "empresa_uuid": d.empresa_uuid,
+
+                "descuento_id": str(d.descuento_id),
+
+                "dia": d.dia,
+
+                "sync_status": d.sync_status,
+
+                "sync_cursor": d.sync_cursor,
+
+                "version": d.version,
+
+                "deleted_at": (
+                    d.deleted_at.isoformat()
+                    if d.deleted_at
+                    else None
+                ),
+
+                "created_at": (
+                    d.created_at.isoformat()
+                    if d.created_at
+                    else None
+                ),
+
+                "updated_at": (
+                    d.updated_at.isoformat()
+                    if d.updated_at
+                    else None
+                )
+            }
+            for d in dias
+        ],
+
+        "has_more": len(dias) == limit
+    }
+
 """ @app.post("/registrar-users")
 async def register_user(
     payload: dict,
@@ -15024,6 +15138,87 @@ async def restore_descuento_productos_changes(
         ],
 
         "has_more": len(relaciones) == limit
+    }
+
+@app.get("/restore/descuento-dias/changes")
+async def restore_descuento_dias_changes(
+    empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.split(
+        " ",
+        1
+    )[1].strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(DescuentoDia)
+        .where(
+            DescuentoDia.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            DescuentoDia.sync_cursor.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    dias = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(d.id),
+
+                "empresa_uuid": d.empresa_uuid,
+
+                "descuento_id": str(d.descuento_id),
+
+                "dia": d.dia,
+
+                "sync_status": d.sync_status,
+
+                "sync_cursor": d.sync_cursor,
+
+                "version": d.version,
+
+                "deleted_at": (
+                    d.deleted_at.isoformat()
+                    if d.deleted_at
+                    else None
+                ),
+
+                "created_at": (
+                    d.created_at.isoformat()
+                    if d.created_at
+                    else None
+                ),
+
+                "updated_at": (
+                    d.updated_at.isoformat()
+                    if d.updated_at
+                    else None
+                )
+            }
+            for d in dias
+        ],
+
+        "has_more": len(dias) == limit
     }
 
 from pydantic import BaseModel
