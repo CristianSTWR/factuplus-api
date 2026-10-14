@@ -2051,18 +2051,19 @@ async def sync_batch(
 
             if item_type == "create_company":
                 
-                uuid = payload["uuid"]
+                company_uuid = payload["uuid"]
 
                 q = await db.execute(
-                    select(Company).where(Company.uuid == uuid)
+                    select(Company).where(
+                        Company.uuid == company_uuid
+                    )
                 )
-
                 exists = q.scalar_one_or_none()
 
                 if not exists:
 
                     company = Company(
-                        uuid=payload["uuid"],
+                        uuid=company_uuid,
                         nombre=payload.get("nombre"),
                         rnc=payload.get("rnc"),
                         telefono=payload.get("telefono"),
