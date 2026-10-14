@@ -13926,6 +13926,181 @@ async def restore_devolucion_detalles_changes(
             len(detalles) == limit
     }
     
+
+@app.get("/restore/cotizaciones/changes")
+async def restore_cotizaciones_changes(
+    empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(Cotizacion)
+        .where(
+            Cotizacion.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            Cotizacion.sync_cursor.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    cotizaciones = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(c.id),
+
+                "empresa_uuid": c.empresa_uuid,
+
+                "cliente_id": str(c.cliente_id)
+                if c.cliente_id
+                else None,
+
+                "usuario_id": str(c.usuario_id)
+                if c.usuario_id
+                else None,
+
+                "modificado_por": str(c.modificado_por)
+                if c.modificado_por
+                else None,
+
+                "fecha": c.fecha.isoformat()
+                if c.fecha
+                else None,
+
+                "fecha_vencimiento": c.fecha_vencimiento.isoformat()
+                if c.fecha_vencimiento
+                else None,
+
+                "estado": c.estado,
+
+                "subtotal": float(c.subtotal or 0),
+
+                "descuento": float(c.descuento or 0),
+
+                "impuesto": float(c.impuesto or 0),
+
+                "total": float(c.total or 0),
+
+                "observaciones": c.observaciones,
+
+                "condiciones": c.condiciones,
+
+                "venta_id": str(c.venta_id)
+                if c.venta_id
+                else None,
+
+                "sync_status": c.sync_status,
+
+                "version": c.version,
+
+                "sync_cursor": c.sync_cursor,
+
+                "deleted_at": c.deleted_at.isoformat()
+                if c.deleted_at
+                else None,
+
+                "created_at": c.created_at.isoformat()
+                if c.created_at
+                else None,
+
+                "updated_at": c.updated_at.isoformat()
+                if c.updated_at
+                else None
+            }
+            for c in cotizaciones
+        ],
+
+        "has_more": len(cotizaciones) == limit
+    }
+    
+@app.get("/restore/cotizacion-detalles/changes")
+async def restore_cotizacion_detalles_changes(
+    empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(CotizacionDetalle)
+        .where(
+            CotizacionDetalle.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            CotizacionDetalle.sync_cursor.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    detalles = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(d.id),
+                "empresa_uuid": str(d.empresa_uuid),
+                "cotizacion_id": str(d.cotizacion_id),
+                "producto_id": str(d.producto_id) if d.producto_id else None,
+                "descripcion": d.descripcion,
+                "cantidad": float(d.cantidad or 0),
+                "precio": float(d.precio or 0),
+                "descuento": float(d.descuento or 0),
+                "impuesto": float(d.impuesto or 0),
+                "total": float(d.total or 0),
+                "sync_status": d.sync_status,
+                "version": d.version,
+                "sync_cursor": d.sync_cursor,
+                "deleted_at": d.deleted_at.isoformat() if d.deleted_at else None,
+                "created_at": d.created_at.isoformat() if d.created_at else None,
+                "updated_at": d.updated_at.isoformat() if d.updated_at else None
+            }
+            for d in detalles
+        ],
+        "has_more": len(detalles) == limit
+    }
+    
 from pydantic import BaseModel
 
 class TokenTmpRequest(BaseModel):
