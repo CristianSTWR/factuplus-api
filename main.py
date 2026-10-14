@@ -5,7 +5,7 @@ import logging
 import os
 import secrets
 import hashlib
-from uuid import UUID, uuid4
+import uuid
 import json
 import string
 import jwt
