@@ -10271,6 +10271,171 @@ async def descuento_dias_changes(
         "has_more": len(dias) == limit
     }
 
+@app.get("/sync/descuento-condiciones/changes")
+async def descuento_condiciones_changes(
+    empresa_uuid: str,
+    cursor: int | None = None,
+    descuento_condicion_id: UUID | None = None,
+    descuento_id: UUID | None = None,
+    limit: int = 5000,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token = authorization.split(
+        " ",
+        1
+    )[1].strip()
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if str(usuario_actual.empresa_uuid) != str(empresa_uuid):
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    limite = max(1, min(limit, 5000))
+
+    query = select(DescuentoCondicion).where(
+        DescuentoCondicion.empresa_uuid == empresa_uuid
+    )
+
+    if descuento_condicion_id is not None:
+        query = query.where(
+            DescuentoCondicion.id == descuento_condicion_id
+        )
+    elif descuento_id is not None:
+        query = query.where(
+            DescuentoCondicion.descuento_id == descuento_id
+        )
+    elif cursor is not None:
+        query = query.where(
+            DescuentoCondicion.sync_cursor > cursor
+        )
+
+    query = query.order_by(
+        DescuentoCondicion.sync_cursor.asc()
+    ).limit(limite)
+
+    result = await db.execute(query)
+
+    condiciones = result.scalars().all()
+
+    print(
+        "SYNC DESCUENTO CONDICIONES:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "descuento_condicion_id": (
+                str(descuento_condicion_id)
+                if descuento_condicion_id
+                else None
+            ),
+            "descuento_id": (
+                str(descuento_id)
+                if descuento_id
+                else None
+            ),
+            "cursor_recibido": cursor,
+            "cantidad": len(condiciones),
+            "primer_cursor": (
+                condiciones[0].sync_cursor
+                if condiciones
+                else None
+            ),
+            "ultimo_cursor": (
+                condiciones[-1].sync_cursor
+                if condiciones
+                else None
+            )
+        }
+    )
+
+    return {
+        "items": [
+            {
+                "id": str(c.id),
+
+                "empresa_uuid": c.empresa_uuid,
+
+                "descuento_id": str(c.descuento_id),
+
+                "tipo": c.tipo,
+
+                "operador": c.operador,
+
+                "valor_numero": (
+                    float(c.valor_numero)
+                    if c.valor_numero is not None
+                    else None
+                ),
+
+                "valor_numero_2": (
+                    float(c.valor_numero_2)
+                    if c.valor_numero_2 is not None
+                    else None
+                ),
+
+                "valor_texto": c.valor_texto,
+
+                "valor_texto_2": c.valor_texto_2,
+
+                "producto_id": (
+                    str(c.producto_id)
+                    if c.producto_id
+                    else None
+                ),
+
+                "cliente_id": (
+                    str(c.cliente_id)
+                    if c.cliente_id
+                    else None
+                ),
+
+                "metodo_pago_id": (
+                    str(c.metodo_pago_id)
+                    if c.metodo_pago_id
+                    else None
+                ),
+
+                "sync_status": c.sync_status,
+
+                "sync_cursor": c.sync_cursor,
+
+                "version": c.version,
+
+                "deleted_at": (
+                    c.deleted_at.isoformat()
+                    if c.deleted_at
+                    else None
+                ),
+
+                "created_at": (
+                    c.created_at.isoformat()
+                    if c.created_at
+                    else None
+                ),
+
+                "updated_at": (
+                    c.updated_at.isoformat()
+                    if c.updated_at
+                    else None
+                )
+            }
+            for c in condiciones
+        ],
+
+        "has_more": len(condiciones) == limite
+    }
+
 """ @app.post("/registrar-users")
 async def register_user(
     payload: dict,
@@ -15219,6 +15384,123 @@ async def restore_descuento_dias_changes(
         ],
 
         "has_more": len(dias) == limit
+    }
+
+@app.get("/restore/descuento-condiciones/changes")
+async def restore_descuento_condiciones_changes(
+    empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.split(
+        " ",
+        1
+    )[1].strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(DescuentoCondicion)
+        .where(
+            DescuentoCondicion.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            DescuentoCondicion.sync_cursor.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    condiciones = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(c.id),
+
+                "empresa_uuid": c.empresa_uuid,
+
+                "descuento_id": str(c.descuento_id),
+
+                "tipo": c.tipo,
+
+                "operador": c.operador,
+
+                "valor_numero": (
+                    float(c.valor_numero)
+                    if c.valor_numero is not None
+                    else None
+                ),
+
+                "valor_numero_2": (
+                    float(c.valor_numero_2)
+                    if c.valor_numero_2 is not None
+                    else None
+                ),
+
+                "valor_texto": c.valor_texto,
+
+                "valor_texto_2": c.valor_texto_2,
+
+                "producto_id": (
+                    str(c.producto_id)
+                    if c.producto_id
+                    else None
+                ),
+
+                "cliente_id": (
+                    str(c.cliente_id)
+                    if c.cliente_id
+                    else None
+                ),
+
+                "metodo_pago_id": (
+                    str(c.metodo_pago_id)
+                    if c.metodo_pago_id
+                    else None
+                ),
+
+                "sync_status": c.sync_status,
+
+                "sync_cursor": c.sync_cursor,
+
+                "version": c.version,
+
+                "deleted_at": (
+                    c.deleted_at.isoformat()
+                    if c.deleted_at
+                    else None
+                ),
+
+                "created_at": (
+                    c.created_at.isoformat()
+                    if c.created_at
+                    else None
+                ),
+
+                "updated_at": (
+                    c.updated_at.isoformat()
+                    if c.updated_at
+                    else None
+                )
+            }
+            for c in condiciones
+        ],
+
+        "has_more": len(condiciones) == limit
     }
 
 from pydantic import BaseModel
