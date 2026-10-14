@@ -6474,13 +6474,10 @@ async def sync_batch(
             elif item_type == "crear_descuento":
 
                 descuento_id = UUID(str(payload["id"]))
-
                 empresa_uuid = payload.get("empresa_uuid")
 
                 if not empresa_uuid:
-                    raise ValueError(
-                        "El descuento no contiene empresa_uuid"
-                    )
+                    raise ValueError("El descuento no contiene empresa_uuid")
 
                 empresa_uuid = str(empresa_uuid)
 
@@ -6517,59 +6514,37 @@ async def sync_batch(
                 valor = Decimal(str(payload.get("valor", 0)))
 
                 if tipo not in tipos_validos:
-                    raise ValueError(
-                        "El tipo de descuento no es válido"
-                    )
+                    raise ValueError("El tipo de descuento no es válido")
 
                 if valor <= 0:
-                    raise ValueError(
-                        "El valor del descuento debe ser mayor que cero"
-                    )
+                    raise ValueError("El valor del descuento debe ser mayor que cero")
 
                 if tipo == "porcentaje" and valor > 100:
-                    raise ValueError(
-                        "El porcentaje no puede superar el 100"
-                    )
+                    raise ValueError("El porcentaje no puede superar el 100")
 
                 if aplicar_a not in aplicar_a_validos:
-                    raise ValueError(
-                        "El destino del descuento no es válido"
-                    )
+                    raise ValueError("El destino del descuento no es válido")
 
                 productos = payload.get("productos") or []
                 clientes = payload.get("clientes") or []
                 condiciones = payload.get("condiciones") or []
                 dias = payload.get("dias") or []
 
-                usar_condiciones = bool(
-                    payload.get("usar_condiciones", False)
-                )
+                usar_condiciones = bool(payload.get("usar_condiciones", False))
 
                 if aplicar_a == "productos" and not productos:
-                    raise ValueError(
-                        "El descuento requiere al menos un producto"
-                    )
+                    raise ValueError("El descuento requiere al menos un producto")
 
                 if usar_condiciones and not condiciones:
-                    raise ValueError(
-                        "El descuento requiere al menos una condición"
-                    )
+                    raise ValueError("El descuento requiere al menos una condición")
 
-                operador_condiciones = payload.get(
-                    "operador_condiciones",
-                    "AND"
-                )
+                operador_condiciones = payload.get("operador_condiciones", "AND")
 
                 if operador_condiciones not in {"AND", "OR"}:
-                    raise ValueError(
-                        "El operador de condiciones no es válido"
-                    )
+                    raise ValueError("El operador de condiciones no es válido")
 
                 usar_producto_beneficiario = bool(
-                    payload.get(
-                        "usar_producto_beneficiario",
-                        False
-                    )
+                    payload.get("usar_producto_beneficiario", False)
                 )
 
                 beneficiario_tipo = (
@@ -6584,14 +6559,13 @@ async def sync_batch(
                     else None
                 )
 
-                if usar_producto_beneficiario:
-                    if beneficiario_tipo not in {
-                        "menor_precio",
-                        "mayor_precio"
-                    }:
-                        raise ValueError(
-                            "El tipo de producto beneficiario no es válido"
-                        )
+                if usar_producto_beneficiario and beneficiario_tipo not in {
+                    "menor_precio",
+                    "mayor_precio"
+                }:
+                    raise ValueError(
+                        "El tipo de producto beneficiario no es válido"
+                    )
 
                 dias = list({
                     int(dia)
@@ -6625,7 +6599,7 @@ async def sync_batch(
 
                 if descuento_existente is None:
 
-                    cursor_descuento = await obtener_siguiente_descuentos_cursor(
+                    sync_cursor = await obtener_siguiente_descuentos_cursor(
                         db,
                         empresa_uuid
                     )
@@ -6665,7 +6639,7 @@ async def sync_batch(
                         ),
                         "se_repite": bool(payload.get("se_repite", False)),
                         "sync_status": "synced",
-                        "sync_cursor": cursor_descuento,
+                        "sync_cursor": sync_cursor,
                         "version": int(payload.get("version", 1)),
                         "deleted_at": (
                             parse_datetime(payload["deleted_at"])
@@ -6692,9 +6666,18 @@ async def sync_batch(
 
                     for producto_data in productos:
 
-                        producto_id = UUID(
-                            str(producto_data["producto_id"])
+                        producto_id = UUID(str(producto_data["producto_id"]))
+
+                        resultado = await db.execute(
+                            select(DescuentoProducto).where(
+                                DescuentoProducto.empresa_uuid == empresa_uuid,
+                                DescuentoProducto.descuento_id == descuento_id,
+                                DescuentoProducto.producto_id == producto_id
+                            )
                         )
+
+                        if resultado.scalar_one_or_none():
+                            continue
 
                         cursor_producto = (
                             await obtener_siguiente_descuento_productos_cursor(
@@ -6707,7 +6690,7 @@ async def sync_batch(
                             "id": (
                                 UUID(str(producto_data["id"]))
                                 if producto_data.get("id")
-                                else uuid4()
+                                else uuid.uuid4()
                             ),
                             "empresa_uuid": empresa_uuid,
                             "descuento_id": descuento_id,
@@ -6732,15 +6715,22 @@ async def sync_batch(
                                 producto_data["updated_at"]
                             )
 
-                        db.add(
-                            DescuentoProducto(**producto_kwargs)
-                        )
+                        db.add(DescuentoProducto(**producto_kwargs))
 
                     for cliente_data in clientes:
 
-                        cliente_id = UUID(
-                            str(cliente_data["cliente_id"])
+                        cliente_id = UUID(str(cliente_data["cliente_id"]))
+
+                        resultado = await db.execute(
+                            select(DescuentoCliente).where(
+                                DescuentoCliente.empresa_uuid == empresa_uuid,
+                                DescuentoCliente.descuento_id == descuento_id,
+                                DescuentoCliente.cliente_id == cliente_id
+                            )
                         )
+
+                        if resultado.scalar_one_or_none():
+                            continue
 
                         cursor_cliente = (
                             await obtener_siguiente_descuento_clientes_cursor(
@@ -6753,7 +6743,7 @@ async def sync_batch(
                             "id": (
                                 UUID(str(cliente_data["id"]))
                                 if cliente_data.get("id")
-                                else uuid4()
+                                else uuid.uuid4()
                             ),
                             "empresa_uuid": empresa_uuid,
                             "descuento_id": descuento_id,
@@ -6778,11 +6768,25 @@ async def sync_batch(
                                 cliente_data["updated_at"]
                             )
 
-                        db.add(
-                            DescuentoCliente(**cliente_kwargs)
-                        )
+                        db.add(DescuentoCliente(**cliente_kwargs))
 
                     for condicion_data in condiciones:
+
+                        condicion_id = (
+                            UUID(str(condicion_data["id"]))
+                            if condicion_data.get("id")
+                            else uuid.uuid4()
+                        )
+
+                        resultado = await db.execute(
+                            select(DescuentoCondicion).where(
+                                DescuentoCondicion.id == condicion_id,
+                                DescuentoCondicion.empresa_uuid == empresa_uuid
+                            )
+                        )
+
+                        if resultado.scalar_one_or_none():
+                            continue
 
                         cursor_condicion = (
                             await obtener_siguiente_descuento_condiciones_cursor(
@@ -6792,11 +6796,7 @@ async def sync_batch(
                         )
 
                         condicion_kwargs = {
-                            "id": (
-                                UUID(str(condicion_data["id"]))
-                                if condicion_data.get("id")
-                                else uuid4()
-                            ),
+                            "id": condicion_id,
                             "empresa_uuid": empresa_uuid,
                             "descuento_id": descuento_id,
                             "tipo": condicion_data["tipo"],
@@ -6848,22 +6848,29 @@ async def sync_batch(
                                 condicion_data["updated_at"]
                             )
 
-                        db.add(
-                            DescuentoCondicion(**condicion_kwargs)
-                        )
+                        db.add(DescuentoCondicion(**condicion_kwargs))
 
                     for dia in dias:
 
-                        cursor_dia = (
-                            await obtener_siguiente_descuento_dias_cursor(
-                                db,
-                                empresa_uuid
+                        resultado = await db.execute(
+                            select(DescuentoDia).where(
+                                DescuentoDia.empresa_uuid == empresa_uuid,
+                                DescuentoDia.descuento_id == descuento_id,
+                                DescuentoDia.dia == dia
                             )
+                        )
+
+                        if resultado.scalar_one_or_none():
+                            continue
+
+                        cursor_dia = await obtener_siguiente_descuento_dias_cursor(
+                            db,
+                            empresa_uuid
                         )
 
                         db.add(
                             DescuentoDia(
-                                id=uuid4(),
+                                id=uuid.uuid4(),
                                 empresa_uuid=empresa_uuid,
                                 descuento_id=descuento_id,
                                 dia=dia,
@@ -6874,7 +6881,7 @@ async def sync_batch(
                         )
 
                     await db.flush()
-
+        
             """ elif item_type == "create_producto":
 
                 q = await db.execute(
