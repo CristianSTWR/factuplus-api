@@ -3,7 +3,7 @@ from sqlalchemy import JSON
 from datetime import datetime
 from decimal import Decimal
 from sqlalchemy import (
-    Boolean, DateTime, Integer, String, Numeric, Enum, 
+    Boolean, DateTime, Integer, String, Numeric, Enum, SmallInteger,
     ForeignKey, UniqueConstraint, func, text, BigInteger, Text, CheckConstraint
 )
 
@@ -2550,6 +2550,573 @@ class CotizacionDetalle(Base):
         unique=True,
         nullable=True
     )
+    
+
+class Descuento(Base):
+
+    __tablename__ = "descuentos"
+
+    __table_args__ = (
+        CheckConstraint(
+            "valor >= 0",
+            name="descuentos_valor_check"
+        ),
+        CheckConstraint(
+            "tipo <> 'porcentaje' OR valor <= 100",
+            name="descuentos_porcentaje_check"
+        ),
+        CheckConstraint(
+            "fecha_fin IS NULL OR fecha_inicio IS NULL OR fecha_fin >= fecha_inicio",
+            name="descuentos_fechas_check"
+        ),
+        CheckConstraint(
+            """
+            (usar_producto_beneficiario AND beneficiario_tipo IS NOT NULL)
+            OR
+            (NOT usar_producto_beneficiario AND beneficiario_tipo IS NULL)
+            """,
+            name="descuentos_beneficiario_config_check"
+        ),
+        CheckConstraint(
+            """
+            beneficiario_tipo IS NULL
+            OR beneficiario_tipo IN ('menor_precio', 'mayor_precio')
+            """,
+            name="descuentos_beneficiario_tipo_check"
+        ),
+        CheckConstraint(
+            "tipo IN ('porcentaje', 'monto_fijo')",
+            name="descuentos_tipo_check"
+        ),
+        CheckConstraint(
+            "aplicar_a IN ('venta', 'productos')",
+            name="descuentos_aplicar_a_check"
+        ),
+        CheckConstraint(
+            "operador_condiciones IN ('AND', 'OR')",
+            name="descuentos_operador_condiciones_check"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        index=True
+    )
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True
+    )
+
+    nombre: Mapped[str] = mapped_column(
+        String(150),
+        nullable=False
+    )
+
+    tipo: Mapped[str] = mapped_column(
+        String,
+        nullable=False
+    )
+
+    valor: Mapped[Decimal] = mapped_column(
+        Numeric(15, 2),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    aplicar_a: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default="productos",
+        server_default=text("'productos'")
+    )
+
+    usar_condiciones: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("FALSE")
+    )
+
+    operador_condiciones: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default="AND",
+        server_default=text("'AND'")
+    )
+
+    fecha_inicio: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    fecha_fin: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    activo: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("TRUE")
+    )
+
+    usar_producto_beneficiario: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("FALSE")
+    )
+
+    aplicar_a_todas_unidades_beneficiario: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("FALSE")
+    )
+
+    beneficiario_tipo: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True
+    )
+
+    beneficiario_valor: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 2),
+        nullable=True
+    )
+
+    se_repite: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("FALSE")
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="synced",
+        server_default=text("'synced'")
+    )
+
+    sync_cursor: Mapped[int | None] = mapped_column(
+        BigInteger,
+        unique=True,
+        nullable=True
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1")
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+
+
+class DescuentoProducto(Base):
+
+    __tablename__ = "descuento_productos"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "descuento_id",
+            "producto_id",
+            name="descuento_productos_unique"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        index=True
+    )
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        String(36),
+        nullable=False,
+        index=True
+    )
+
+    descuento_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "descuentos.id",
+            ondelete="CASCADE"
+        ),
+        nullable=False,
+        index=True
+    )
+
+    producto_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "productos.id",
+            ondelete="CASCADE"
+        ),
+        nullable=False,
+        index=True
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="synced",
+        server_default=text("'synced'")
+    )
+
+    sync_cursor: Mapped[int | None] = mapped_column(
+        BigInteger,
+        unique=True,
+        nullable=True
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1")
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+    
+class DescuentoCliente(Base):
+
+    __tablename__ = "descuento_clientes"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "descuento_id",
+            "cliente_id",
+            name="descuento_clientes_unique"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        index=True
+    )
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        String(36),
+        nullable=False,
+        index=True
+    )
+
+    descuento_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "descuentos.id",
+            ondelete="CASCADE"
+        ),
+        nullable=False,
+        index=True
+    )
+
+    cliente_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "clientes.id",
+            ondelete="CASCADE"
+        ),
+        nullable=False,
+        index=True
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="synced",
+        server_default=text("'synced'")
+    )
+
+    sync_cursor: Mapped[int | None] = mapped_column(
+        BigInteger,
+        unique=True,
+        nullable=True
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1")
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+    
+class DescuentoCondicion(Base):
+
+    __tablename__ = "descuento_condiciones"
+
+    __table_args__ = (
+        CheckConstraint(
+            "tipo IN ('cantidad', 'cantidad_productos_diferentes', 'importe', 'cliente', 'forma_pago', 'dia_semana', 'horario')",
+            name="descuento_condiciones_tipo_check"
+        ),
+        CheckConstraint(
+            "operador IN ('minimo', 'maximo', 'exacto', 'rango', 'igual')",
+            name="descuento_condiciones_operador_check"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        index=True
+    )
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        index=True
+    )
+
+    descuento_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "descuentos.id",
+            ondelete="CASCADE"
+        ),
+        nullable=False,
+        index=True
+    )
+
+    tipo: Mapped[str] = mapped_column(
+        Text,
+        nullable=False
+    )
+
+    operador: Mapped[str] = mapped_column(
+        Text,
+        nullable=False
+    )
+
+    valor_numero: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 2),
+        nullable=True
+    )
+
+    valor_numero_2: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 2),
+        nullable=True
+    )
+
+    valor_texto: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    valor_texto_2: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    producto_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "productos.id",
+            ondelete="CASCADE"
+        ),
+        nullable=True,
+        index=True
+    )
+
+    cliente_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "clientes.id",
+            ondelete="CASCADE"
+        ),
+        nullable=True,
+        index=True
+    )
+
+    metodo_pago_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "metodos_pago.id",
+            ondelete="CASCADE"
+        ),
+        nullable=True,
+        index=True
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="synced",
+        server_default=text("'synced'")
+    )
+
+    sync_cursor: Mapped[int | None] = mapped_column(
+        BigInteger,
+        unique=True,
+        nullable=True
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1")
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+       
+class DescuentoDia(Base):
+
+    __tablename__ = "descuento_dias"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "descuento_id",
+            "dia",
+            name="descuento_dias_unique"
+        ),
+        CheckConstraint(
+            "dia BETWEEN 0 AND 6",
+            name="descuento_dias_dia_check"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        index=True
+    )
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        index=True
+    )
+
+    descuento_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "descuentos.id",
+            ondelete="CASCADE"
+        ),
+        nullable=False,
+        index=True
+    )
+
+    dia: Mapped[int] = mapped_column(
+        SmallInteger,
+        nullable=False
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="synced",
+        server_default=text("'synced'")
+    )
+
+    sync_cursor: Mapped[int | None] = mapped_column(
+        BigInteger,
+        unique=True,
+        nullable=True
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1")
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+
+
+
 
 """ WEB PAGINA """
 

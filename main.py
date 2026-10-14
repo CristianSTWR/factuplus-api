@@ -75,7 +75,7 @@ import httpx
 import re
 # APLICACION
 from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, Producto, UnidadMedida, Rol, RolPermiso, UsuarioRol, MetodoPago, Cliente, Suplidor
-from models import Compra, CompraDetalle, VentaDetalle, Pago, HistorialStock, Devolucion, DevolucionDetalle, Cotizacion, CotizacionDetalle
+from models import Compra, CompraDetalle, VentaDetalle, Pago, HistorialStock, Devolucion, DevolucionDetalle, Cotizacion, CotizacionDetalle, Descuento, DescuentoCliente, DescuentoCondicion, DescuentoDia, DescuentoProducto
 
 # WEB
 from models import ListaEspera, EmpresaDispositivo
@@ -6470,6 +6470,410 @@ async def sync_batch(
                     }
                 )
 
+
+            elif item_type == "crear_descuento":
+
+                descuento_id = UUID(str(payload["id"]))
+
+                empresa_uuid = payload.get("empresa_uuid")
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "El descuento no contiene empresa_uuid"
+                    )
+
+                empresa_uuid = str(empresa_uuid)
+
+                tipos_validos = {
+                    "porcentaje",
+                    "monto_fijo"
+                }
+
+                aplicar_a_validos = {
+                    "venta",
+                    "productos"
+                }
+
+                tipos_condicion_validos = {
+                    "cantidad",
+                    "cantidad_productos_diferentes",
+                    "importe",
+                    "cliente",
+                    "forma_pago",
+                    "dia_semana",
+                    "horario"
+                }
+
+                operadores_validos = {
+                    "minimo",
+                    "maximo",
+                    "exacto",
+                    "rango",
+                    "igual"
+                }
+
+                tipo = payload.get("tipo")
+                aplicar_a = payload.get("aplicar_a")
+                valor = Decimal(str(payload.get("valor", 0)))
+
+                if tipo not in tipos_validos:
+                    raise ValueError(
+                        "El tipo de descuento no es válido"
+                    )
+
+                if valor <= 0:
+                    raise ValueError(
+                        "El valor del descuento debe ser mayor que cero"
+                    )
+
+                if tipo == "porcentaje" and valor > 100:
+                    raise ValueError(
+                        "El porcentaje no puede superar el 100"
+                    )
+
+                if aplicar_a not in aplicar_a_validos:
+                    raise ValueError(
+                        "El destino del descuento no es válido"
+                    )
+
+                productos = payload.get("productos") or []
+                clientes = payload.get("clientes") or []
+                condiciones = payload.get("condiciones") or []
+                dias = payload.get("dias") or []
+
+                usar_condiciones = bool(
+                    payload.get("usar_condiciones", False)
+                )
+
+                if aplicar_a == "productos" and not productos:
+                    raise ValueError(
+                        "El descuento requiere al menos un producto"
+                    )
+
+                if usar_condiciones and not condiciones:
+                    raise ValueError(
+                        "El descuento requiere al menos una condición"
+                    )
+
+                operador_condiciones = payload.get(
+                    "operador_condiciones",
+                    "AND"
+                )
+
+                if operador_condiciones not in {"AND", "OR"}:
+                    raise ValueError(
+                        "El operador de condiciones no es válido"
+                    )
+
+                usar_producto_beneficiario = bool(
+                    payload.get(
+                        "usar_producto_beneficiario",
+                        False
+                    )
+                )
+
+                beneficiario_tipo = (
+                    payload.get("beneficiario_tipo")
+                    if usar_producto_beneficiario
+                    else None
+                )
+
+                beneficiario_valor = (
+                    payload.get("beneficiario_valor")
+                    if usar_producto_beneficiario
+                    else None
+                )
+
+                if usar_producto_beneficiario:
+                    if beneficiario_tipo not in {
+                        "menor_precio",
+                        "mayor_precio"
+                    }:
+                        raise ValueError(
+                            "El tipo de producto beneficiario no es válido"
+                        )
+
+                dias = list({
+                    int(dia)
+                    for dia in dias
+                })
+
+                if any(dia < 0 or dia > 6 for dia in dias):
+                    raise ValueError(
+                        "Los días de la semana deben estar entre 0 y 6"
+                    )
+
+                for condicion_data in condiciones:
+                    if condicion_data.get("tipo") not in tipos_condicion_validos:
+                        raise ValueError(
+                            "Una condición del descuento no es válida"
+                        )
+
+                    if condicion_data.get("operador") not in operadores_validos:
+                        raise ValueError(
+                            "El operador de una condición no es válido"
+                        )
+
+                resultado = await db.execute(
+                    select(Descuento).where(
+                        Descuento.id == descuento_id,
+                        Descuento.empresa_uuid == empresa_uuid
+                    )
+                )
+
+                descuento_existente = resultado.scalar_one_or_none()
+
+                if descuento_existente is None:
+
+                    cursor_descuento = await obtener_siguiente_descuentos_cursor(
+                        db,
+                        empresa_uuid
+                    )
+
+                    descuento_kwargs = {
+                        "id": descuento_id,
+                        "empresa_uuid": empresa_uuid,
+                        "nombre": payload["nombre"],
+                        "tipo": tipo,
+                        "valor": valor,
+                        "aplicar_a": aplicar_a,
+                        "usar_condiciones": usar_condiciones,
+                        "operador_condiciones": operador_condiciones,
+                        "fecha_inicio": (
+                            parse_datetime(payload["fecha_inicio"])
+                            if payload.get("fecha_inicio")
+                            else None
+                        ),
+                        "fecha_fin": (
+                            parse_datetime(payload["fecha_fin"])
+                            if payload.get("fecha_fin")
+                            else None
+                        ),
+                        "activo": bool(payload.get("activo", True)),
+                        "usar_producto_beneficiario": usar_producto_beneficiario,
+                        "aplicar_a_todas_unidades_beneficiario": bool(
+                            payload.get(
+                                "aplicar_a_todas_unidades_beneficiario",
+                                False
+                            )
+                        ),
+                        "beneficiario_tipo": beneficiario_tipo,
+                        "beneficiario_valor": (
+                            Decimal(str(beneficiario_valor))
+                            if beneficiario_valor is not None
+                            else None
+                        ),
+                        "se_repite": bool(payload.get("se_repite", False)),
+                        "sync_status": "synced",
+                        "sync_cursor": cursor_descuento,
+                        "version": int(payload.get("version", 1)),
+                        "deleted_at": (
+                            parse_datetime(payload["deleted_at"])
+                            if payload.get("deleted_at")
+                            else None
+                        )
+                    }
+
+                    if payload.get("created_at"):
+                        descuento_kwargs["created_at"] = parse_datetime(
+                            payload["created_at"]
+                        )
+
+                    if payload.get("updated_at"):
+                        descuento_kwargs["updated_at"] = parse_datetime(
+                            payload["updated_at"]
+                        )
+
+                    descuento = Descuento(**descuento_kwargs)
+
+                    db.add(descuento)
+
+                    await db.flush()
+
+                    for producto_data in productos:
+
+                        producto_id = UUID(
+                            str(producto_data["producto_id"])
+                        )
+
+                        cursor_producto = (
+                            await obtener_siguiente_descuento_productos_cursor(
+                                db,
+                                empresa_uuid
+                            )
+                        )
+
+                        producto_kwargs = {
+                            "id": (
+                                UUID(str(producto_data["id"]))
+                                if producto_data.get("id")
+                                else uuid4()
+                            ),
+                            "empresa_uuid": empresa_uuid,
+                            "descuento_id": descuento_id,
+                            "producto_id": producto_id,
+                            "sync_status": "synced",
+                            "sync_cursor": cursor_producto,
+                            "version": int(producto_data.get("version", 1)),
+                            "deleted_at": (
+                                parse_datetime(producto_data["deleted_at"])
+                                if producto_data.get("deleted_at")
+                                else None
+                            )
+                        }
+
+                        if producto_data.get("created_at"):
+                            producto_kwargs["created_at"] = parse_datetime(
+                                producto_data["created_at"]
+                            )
+
+                        if producto_data.get("updated_at"):
+                            producto_kwargs["updated_at"] = parse_datetime(
+                                producto_data["updated_at"]
+                            )
+
+                        db.add(
+                            DescuentoProducto(**producto_kwargs)
+                        )
+
+                    for cliente_data in clientes:
+
+                        cliente_id = UUID(
+                            str(cliente_data["cliente_id"])
+                        )
+
+                        cursor_cliente = (
+                            await obtener_siguiente_descuento_clientes_cursor(
+                                db,
+                                empresa_uuid
+                            )
+                        )
+
+                        cliente_kwargs = {
+                            "id": (
+                                UUID(str(cliente_data["id"]))
+                                if cliente_data.get("id")
+                                else uuid4()
+                            ),
+                            "empresa_uuid": empresa_uuid,
+                            "descuento_id": descuento_id,
+                            "cliente_id": cliente_id,
+                            "sync_status": "synced",
+                            "sync_cursor": cursor_cliente,
+                            "version": int(cliente_data.get("version", 1)),
+                            "deleted_at": (
+                                parse_datetime(cliente_data["deleted_at"])
+                                if cliente_data.get("deleted_at")
+                                else None
+                            )
+                        }
+
+                        if cliente_data.get("created_at"):
+                            cliente_kwargs["created_at"] = parse_datetime(
+                                cliente_data["created_at"]
+                            )
+
+                        if cliente_data.get("updated_at"):
+                            cliente_kwargs["updated_at"] = parse_datetime(
+                                cliente_data["updated_at"]
+                            )
+
+                        db.add(
+                            DescuentoCliente(**cliente_kwargs)
+                        )
+
+                    for condicion_data in condiciones:
+
+                        cursor_condicion = (
+                            await obtener_siguiente_descuento_condiciones_cursor(
+                                db,
+                                empresa_uuid
+                            )
+                        )
+
+                        condicion_kwargs = {
+                            "id": (
+                                UUID(str(condicion_data["id"]))
+                                if condicion_data.get("id")
+                                else uuid4()
+                            ),
+                            "empresa_uuid": empresa_uuid,
+                            "descuento_id": descuento_id,
+                            "tipo": condicion_data["tipo"],
+                            "operador": condicion_data["operador"],
+                            "valor_numero": (
+                                Decimal(str(condicion_data["valor_numero"]))
+                                if condicion_data.get("valor_numero") is not None
+                                else None
+                            ),
+                            "valor_numero_2": (
+                                Decimal(str(condicion_data["valor_numero_2"]))
+                                if condicion_data.get("valor_numero_2") is not None
+                                else None
+                            ),
+                            "valor_texto": condicion_data.get("valor_texto"),
+                            "valor_texto_2": condicion_data.get("valor_texto_2"),
+                            "producto_id": (
+                                UUID(str(condicion_data["producto_id"]))
+                                if condicion_data.get("producto_id")
+                                else None
+                            ),
+                            "cliente_id": (
+                                UUID(str(condicion_data["cliente_id"]))
+                                if condicion_data.get("cliente_id")
+                                else None
+                            ),
+                            "metodo_pago_id": (
+                                UUID(str(condicion_data["metodo_pago_id"]))
+                                if condicion_data.get("metodo_pago_id")
+                                else None
+                            ),
+                            "sync_status": "synced",
+                            "sync_cursor": cursor_condicion,
+                            "version": int(condicion_data.get("version", 1)),
+                            "deleted_at": (
+                                parse_datetime(condicion_data["deleted_at"])
+                                if condicion_data.get("deleted_at")
+                                else None
+                            )
+                        }
+
+                        if condicion_data.get("created_at"):
+                            condicion_kwargs["created_at"] = parse_datetime(
+                                condicion_data["created_at"]
+                            )
+
+                        if condicion_data.get("updated_at"):
+                            condicion_kwargs["updated_at"] = parse_datetime(
+                                condicion_data["updated_at"]
+                            )
+
+                        db.add(
+                            DescuentoCondicion(**condicion_kwargs)
+                        )
+
+                    for dia in dias:
+
+                        cursor_dia = (
+                            await obtener_siguiente_descuento_dias_cursor(
+                                db,
+                                empresa_uuid
+                            )
+                        )
+
+                        db.add(
+                            DescuentoDia(
+                                id=uuid4(),
+                                empresa_uuid=empresa_uuid,
+                                descuento_id=descuento_id,
+                                dia=dia,
+                                sync_status="synced",
+                                sync_cursor=cursor_dia,
+                                version=1
+                            )
+                        )
+
+                    await db.flush()
 
             """ elif item_type == "create_producto":
 
@@ -15787,6 +16191,396 @@ async def obtener_siguiente_cotizacion_detalles_cursor(
         {
             "empresa_uuid": empresa_uuid,
             "cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
+    
+async def obtener_siguiente_descuentos_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                descuentos_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT descuentos_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM descuentos
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = max(
+        cursor_actual,
+        max_cursor
+    ) + 1
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET descuentos_cursor = :descuentos_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING descuentos_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "descuentos_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
+    
+async def obtener_siguiente_descuento_productos_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                descuento_productos_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT descuento_productos_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM descuento_productos
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = max(
+        cursor_actual,
+        max_cursor
+    ) + 1
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET descuento_productos_cursor = :descuento_productos_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING descuento_productos_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "descuento_productos_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
+    
+async def obtener_siguiente_descuento_clientes_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                descuento_clientes_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT descuento_clientes_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM descuento_clientes
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = max(
+        cursor_actual,
+        max_cursor
+    ) + 1
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET descuento_clientes_cursor = :descuento_clientes_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING descuento_clientes_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "descuento_clientes_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
+    
+async def obtener_siguiente_descuento_condiciones_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                descuento_condiciones_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT descuento_condiciones_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM descuento_condiciones
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = max(
+        cursor_actual,
+        max_cursor
+    ) + 1
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET descuento_condiciones_cursor = :descuento_condiciones_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING descuento_condiciones_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "descuento_condiciones_cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )
+    
+async def obtener_siguiente_descuento_dias_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                descuento_dias_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT descuento_dias_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM descuento_dias
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = max(
+        cursor_actual,
+        max_cursor
+    ) + 1
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET descuento_dias_cursor = :descuento_dias_cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING descuento_dias_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "descuento_dias_cursor": siguiente_cursor
         }
     )
 
