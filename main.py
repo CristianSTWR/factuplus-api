@@ -7932,7 +7932,23 @@ async def ventas_changes(
 
                 "cambio":
                     float(v.cambio or 0),
-
+                    
+                "subtotal":
+                    float(v.subtotal or 0),
+                    
+                "itbis":
+                    float(v.itbis or 0),
+                    
+                "descuento_tipo":
+                    float(v.descuento_tipo or 0),
+                    
+                "descuento_porcentaje":
+                    float(v.descuento_porcentaje or 0),
+                    
+                "descuento_monto":
+                    float(v.descuento_monto or 0),
+                    
+            
                 "sync_status":
                     v.sync_status,
 
@@ -14120,7 +14136,22 @@ async def restore_ventas_changes(
                 "monto_pendiente":
                     float(v.monto_pendiente or 0),
 
-                "cambio":
+                "subtotal":
+                    float(v.subtotal or 0),
+                    
+                "itbis":
+                    float(v.itbis or 0),
+                    
+                "descuento_tipo":
+                    float(v.descuento_tipo or 0),
+                    
+                "descuento_porcentaje":
+                    float(v.descuento_porcentaje or 0),
+                    
+                "descuento_monto":
+                    float(v.descuento_monto or 0),
+                    
+                 "cambio":
                     float(v.cambio or 0),
 
                 "sync_status":

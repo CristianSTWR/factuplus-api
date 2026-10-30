@@ -3,7 +3,7 @@ from sqlalchemy import JSON
 from datetime import datetime
 from decimal import Decimal
 from sqlalchemy import (
-    Boolean, DateTime, Integer, String, Numeric, Enum, SmallInteger,
+    Boolean, DateTime, Integer, String, Numeric, Enum, SmallInteger, Date,
     ForeignKey, UniqueConstraint, func, text, BigInteger, Text, CheckConstraint
 )
 
@@ -831,6 +831,41 @@ class Venta(Base):
     )
 
     cambio: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+    
+    subtotal: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    itbis: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    descuento_tipo: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        default="monto",
+        server_default=text("'monto'")
+    )
+
+    descuento_porcentaje: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    descuento_monto: Mapped[Decimal] = mapped_column(
         Numeric(12, 2),
         nullable=False,
         default=0,
@@ -3116,7 +3151,343 @@ class DescuentoDia(Base):
     )
 
 
+class Gasto(Base):
 
+    __tablename__ = "gastos"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        index=True
+    )
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        index=True
+    )
+
+    concepto: Mapped[str] = mapped_column(
+        Text,
+        nullable=False
+    )
+
+    categoria: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True
+    )
+
+    proveedor_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=True
+    )
+
+    monto: Mapped[float] = mapped_column(
+        Numeric(12, 2),
+        nullable=False
+    )
+
+    monto_pagado: Mapped[float] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    monto_pendiente: Mapped[float] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    es_recurrente: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("FALSE")
+    )
+
+    frecuencia: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True
+    )
+
+    dia_recurrencia: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True
+    )
+
+    fecha_recurrencia: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True
+    )
+
+    fecha: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+        server_default=text("CURRENT_DATE")
+    )
+
+    fecha_vencimiento: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True
+    )
+
+    estado: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="pendiente",
+        server_default=text("'pendiente'")
+    )
+
+    observacion: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="synced",
+        server_default=text("'synced'")
+    )
+
+    sync_cursor: Mapped[int | None] = mapped_column(
+        BigInteger,
+        unique=True,
+        nullable=True
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1")
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+
+class GastoPago(Base):
+
+    __tablename__ = "gastos_pagos"
+
+    __table_args__ = (
+        CheckConstraint(
+            "pago_periodo = DATE_TRUNC('month', pago_periodo)::date",
+            name="gastos_pagos_pago_periodo_primer_dia_chk"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        index=True
+    )
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        index=True
+    )
+
+    gasto_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "gastos.id",
+            ondelete="NO ACTION"
+        ),
+        nullable=False,
+        index=True
+    )
+
+    pago_periodo: Mapped[date] = mapped_column(
+        Date,
+        nullable=False
+    )
+
+    monto: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False
+    )
+
+    fecha_pago: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+
+    tipo_pago: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True
+    )
+
+    observacion: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="synced",
+        server_default=text("'synced'")
+    )
+
+    sync_cursor: Mapped[int | None] = mapped_column(
+        BigInteger,
+        unique=True,
+        nullable=True
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1")
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+    
+class GastoObligacion(Base):
+
+    __tablename__ = "gastos_obligaciones"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "gasto_id",
+            "periodo",
+            name="gastos_obligaciones_gasto_id_periodo_key"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        index=True
+    )
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        index=True
+    )
+
+    gasto_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "gastos.id",
+            ondelete="NO ACTION"
+        ),
+        nullable=False,
+        index=True
+    )
+
+    periodo: Mapped[date] = mapped_column(
+        Date,
+        nullable=False
+    )
+
+    monto: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False
+    )
+
+    monto_pagado: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default=text("0")
+    )
+
+    monto_pendiente: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default=text("0")
+    )
+
+    fecha_vencimiento: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True
+    )
+
+    estado: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="pendiente",
+        server_default=text("'pendiente'")
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="synced",
+        server_default=text("'synced'")
+    )
+
+    sync_cursor: Mapped[int | None] = mapped_column(
+        BigInteger,
+        unique=True,
+        nullable=True
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1")
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
 
 """ WEB PAGINA """
 
