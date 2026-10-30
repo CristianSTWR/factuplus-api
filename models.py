@@ -3151,7 +3151,7 @@ class DescuentoDia(Base):
     )
 
 
-class Gasto(Base):
+""" class Gasto(Base):
 
     __tablename__ = "gastos"
 
@@ -3488,6 +3488,8 @@ class GastoObligacion(Base):
         nullable=False,
         server_default=text("NOW()")
     )
+    
+ """
 
 """ WEB PAGINA """
 
