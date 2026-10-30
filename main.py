@@ -2703,6 +2703,13 @@ async def sync_batch(
                                 )
                             )
                         ),
+                        
+                        subtotal=Decimal(str(payload.get("subtotal", 0))),
+                        itbis=Decimal(str(payload.get("itbis", 0))),
+                        descuento_tipo=payload.get("descuento_tipo", "monto"),
+                        descuento_porcentaje=Decimal(str(payload.get("descuento_porcentaje", 0))),
+                        descuento_monto=Decimal(str(payload.get("descuento_monto", 0))),
+                        
 
                         tipo_pago=payload.get(
                             "tipo_pago"
