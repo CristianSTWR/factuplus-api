@@ -7940,7 +7940,7 @@ async def ventas_changes(
                     float(v.itbis or 0),
                     
                 "descuento_tipo":
-                    float(v.descuento_tipo),
+                    v.descuento_tipo,
                     
                 "descuento_porcentaje":
                     float(v.descuento_porcentaje or 0),
@@ -14143,7 +14143,7 @@ async def restore_ventas_changes(
                     float(v.itbis or 0),
                     
                 "descuento_tipo":
-                    float(v.descuento_tipo),
+                    v.descuento_tipo,
                     
                 "descuento_porcentaje":
                     float(v.descuento_porcentaje or 0),
