@@ -8297,6 +8297,10 @@ async def venta_detalles_changes(
                 "tasa_itbis": float(
                     d.tasa_itbis or 0
                 ),
+                
+                "itbis": float(d.itbis or 0),
+
+                "total": float(d.total or 0),
 
                 "sync_status": d.sync_status,
 
@@ -14117,6 +14121,10 @@ async def restore_venta_detalles_changes(
                 "tasa_itbis": float(
                     d.tasa_itbis or 0
                 ),
+                
+                "itbis": float(d.itbis or 0),
+                
+                "total": float(d.total or 0),
 
                 "sync_status": d.sync_status,
 
