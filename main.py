@@ -3020,9 +3020,7 @@ async def sync_batch(
                                 )
                             ),
                             
-                            itbis_original=Decimal(
-                                str(detalle_data.get("itbis_original", 0))
-                            ),
+                         
 
                             itbis_neto=Decimal(
                                 str(detalle_data.get("itbis_neto", detalle_data.get("itbis", 0)))
@@ -8320,9 +8318,6 @@ async def venta_detalles_changes(
 
                 "itbis": float(d.itbis or 0),
 
-                "itbis_original": float(
-                    d.itbis_original or 0
-                ),
 
                 "itbis_neto": float(
                     d.itbis_neto or 0
@@ -14166,9 +14161,7 @@ async def restore_venta_detalles_changes(
                     d.itbis or 0
                 ),
 
-                "itbis_original": float(
-                    d.itbis_original or 0
-                ),
+            
 
                 "itbis_neto": float(
                     d.itbis_neto or 0

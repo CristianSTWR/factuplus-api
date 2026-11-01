@@ -1035,12 +1035,7 @@ class VentaDetalle(Base):
         server_default=text("0")
     )
 
-    itbis_original: Mapped[Decimal] = mapped_column(
-        Numeric(12, 2),
-        nullable=False,
-        default=Decimal("0"),
-        server_default=text("0")
-    )
+  
 
     itbis_neto: Mapped[Decimal] = mapped_column(
         Numeric(12, 2),
