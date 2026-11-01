@@ -1020,6 +1020,20 @@ class VentaDetalle(Base):
         default=Decimal("0"),
         server_default=text("0")
     )
+    
+    itbis: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=Decimal("0"),
+        server_default=text("0")
+    )
+
+    total: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=Decimal("0"),
+        server_default=text("0")
+    )
 
     sync_status: Mapped[str] = mapped_column(
         String(20),

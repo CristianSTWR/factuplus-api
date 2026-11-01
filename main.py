@@ -3020,7 +3020,11 @@ async def sync_batch(
                                 )
                             ),
                             
-
+                            itbis=Decimal(str(detalle_data.get("itbis", 0))),
+                            
+                            total=Decimal(str(detalle_data.get("total", 0))),
+                            
+                            
                             sync_status=detalle_data.get(
                                 "sync_status",
                                 "synced"
