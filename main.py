@@ -3020,6 +3020,26 @@ async def sync_batch(
                                 )
                             ),
                             
+                            itbis_original=Decimal(
+                                str(detalle_data.get("itbis_original", 0))
+                            ),
+
+                            itbis_neto=Decimal(
+                                str(detalle_data.get("itbis_neto", detalle_data.get("itbis", 0)))
+                            ),
+
+                            reduccion_itbis=Decimal(
+                                str(detalle_data.get("reduccion_itbis", 0))
+                            ),
+
+                            base_imponible=Decimal(
+                                str(detalle_data.get("base_imponible", 0))
+                            ),
+
+                            descuento_global_asignado=Decimal(
+                                str(detalle_data.get("descuento_global_asignado", 0))
+                            ),
+                                                        
                             itbis=Decimal(str(detalle_data.get("itbis", 0))),
                             
                             total=Decimal(str(detalle_data.get("total", 0))),
@@ -8297,8 +8317,28 @@ async def venta_detalles_changes(
                 "tasa_itbis": float(
                     d.tasa_itbis or 0
                 ),
-                
+
                 "itbis": float(d.itbis or 0),
+
+                "itbis_original": float(
+                    d.itbis_original or 0
+                ),
+
+                "itbis_neto": float(
+                    d.itbis_neto or 0
+                ),
+
+                "reduccion_itbis": float(
+                    d.reduccion_itbis or 0
+                ),
+
+                "base_imponible": float(
+                    d.base_imponible or 0
+                ),
+
+                "descuento_global_asignado": float(
+                    d.descuento_global_asignado or 0
+                ),
 
                 "total": float(d.total or 0),
 
@@ -14118,13 +14158,37 @@ async def restore_venta_detalles_changes(
                     d.descuentos_promocionales or []
                 ),
 
-                "tasa_itbis": float(
+                                "tasa_itbis": float(
                     d.tasa_itbis or 0
                 ),
-                
-                "itbis": float(d.itbis or 0),
-                
-                "total": float(d.total or 0),
+
+                "itbis": float(
+                    d.itbis or 0
+                ),
+
+                "itbis_original": float(
+                    d.itbis_original or 0
+                ),
+
+                "itbis_neto": float(
+                    d.itbis_neto or 0
+                ),
+
+                "reduccion_itbis": float(
+                    d.reduccion_itbis or 0
+                ),
+
+                "base_imponible": float(
+                    d.base_imponible or 0
+                ),
+
+                "descuento_global_asignado": float(
+                    d.descuento_global_asignado or 0
+                ),
+
+                "total": float(
+                    d.total or 0
+                ),
 
                 "sync_status": d.sync_status,
 

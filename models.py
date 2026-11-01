@@ -1035,6 +1035,42 @@ class VentaDetalle(Base):
         server_default=text("0")
     )
 
+    itbis_original: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=Decimal("0"),
+        server_default=text("0")
+    )
+
+    itbis_neto: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=Decimal("0"),
+        server_default=text("0")
+    )
+
+    reduccion_itbis: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=Decimal("0"),
+        server_default=text("0")
+    )
+
+    base_imponible: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=Decimal("0"),
+        server_default=text("0")
+    )
+
+    descuento_global_asignado: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=Decimal("0"),
+        server_default=text("0")
+    )
+
+
     sync_status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
