@@ -2667,6 +2667,18 @@ async def sync_batch(
                             if payload.get("cliente_id")
                             else None
                         ),
+                        
+                        atendido_por=(
+                                                    UUID(payload["atendido_por"])
+                                                    if payload.get("atendido_por")
+                                                    else None
+                                                ),
+                        
+                        caja_id=(
+                                                                            UUID(payload["caja_id"])
+                                                                            if payload.get("caja_id")
+                                                                            else None
+                                                                        ),
 
                         total=Decimal(
                             str(
@@ -7988,6 +8000,16 @@ async def ventas_changes(
                 "cliente_id":
                     str(v.cliente_id)
                     if v.cliente_id
+                    else None,
+                    
+                "atendido_por":
+                    str(v.atendido_por)
+                    if v.atendido_por
+                    else None,
+                    
+                "caja_id":
+                    str(v.caja_id)
+                    if v.caja_id
                     else None,
 
                 "total":
@@ -14265,6 +14287,16 @@ async def restore_ventas_changes(
                 "cliente_id":
                     str(v.cliente_id)
                     if v.cliente_id
+                    else None,
+                    
+                "atendido_por":
+                    str(v.atendido_por)
+                    if v.atendido_por
+                    else None,
+
+                "caja_id":
+                    str(v.caja_id)
+                    if v.caja_id
                     else None,
 
                 "total":

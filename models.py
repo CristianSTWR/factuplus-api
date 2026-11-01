@@ -811,6 +811,18 @@ class Venta(Base):
         nullable=True
     )
 
+    atendido_por: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("usuarios.id"),
+        nullable=True
+    )
+
+    caja_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("cajas.id"),
+        nullable=True
+    )
+
     total: Mapped[Decimal] = mapped_column(
         Numeric(12, 2),
         nullable=False
