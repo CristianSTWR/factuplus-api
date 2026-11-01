@@ -2980,6 +2980,45 @@ async def sync_batch(
                                     )
                                 )
                             ),
+                            
+                            descuento_tipo=detalle_data.get(
+                                "descuento_tipo",
+                                "monto"
+                            ),
+
+                            descuento_porcentaje=Decimal(
+                                str(
+                                    detalle_data.get(
+                                        "descuento_porcentaje",
+                                        0
+                                    )
+                                )
+                            ),
+
+                            descuento_monto=Decimal(
+                                str(
+                                    detalle_data.get(
+                                        "descuento_monto",
+                                        0
+                                    )
+                                )
+                            ),
+
+                            descuentos_promocionales=(
+                                detalle_data.get(
+                                    "descuentos_promocionales",
+                                    []
+                                ) or []
+                            ),
+
+                            tasa_itbis=Decimal(
+                                str(
+                                    detalle_data.get(
+                                        "tasa_itbis",
+                                        0
+                                    )
+                                )
+                            ),
 
                             sync_status=detalle_data.get(
                                 "sync_status",
@@ -8188,13 +8227,9 @@ async def venta_detalles_changes(
         VentaDetalle.sync_cursor.asc()
     )
 
-    query = query.limit(
-        limit
-    )
+    query = query.limit(limit)
 
-    result = await db.execute(
-        query
-    )
+    result = await db.execute(query)
 
     detalles = result.scalars().all()
 
@@ -8222,57 +8257,72 @@ async def venta_detalles_changes(
             {
                 "id": str(d.id),
 
-                "empresa_uuid":
-                    d.empresa_uuid,
+                "empresa_uuid": d.empresa_uuid,
 
-                "venta_id":
+                "venta_id": (
                     str(d.venta_id)
                     if d.venta_id
-                    else None,
+                    else None
+                ),
 
-                "producto_id":
-                    str(d.producto_id),
+                "producto_id": str(d.producto_id),
 
-                "cantidad":
-                    float(d.cantidad or 0),
+                "cantidad": float(d.cantidad or 0),
 
-                "precio_unitario":
-                    float(d.precio_unitario or 0),
+                "precio_unitario": float(
+                    d.precio_unitario or 0
+                ),
 
-                "subtotal":
-                    float(d.subtotal or 0),
+                "subtotal": float(d.subtotal or 0),
 
-                "sync_status":
-                    d.sync_status,
+                "descuento_tipo": d.descuento_tipo,
 
-                "version":
-                    d.version,
+                "descuento_porcentaje": float(
+                    d.descuento_porcentaje or 0
+                ),
 
-                "sync_cursor":
-                    d.sync_cursor,
+                "descuento_monto": float(
+                    d.descuento_monto or 0
+                ),
 
-                "deleted_at":
+                "descuentos_promocionales": (
+                    d.descuentos_promocionales or []
+                ),
+
+                "tasa_itbis": float(
+                    d.tasa_itbis or 0
+                ),
+
+                "sync_status": d.sync_status,
+
+                "version": d.version,
+
+                "sync_cursor": d.sync_cursor,
+
+                "deleted_at": (
                     d.deleted_at.isoformat()
                     if d.deleted_at
-                    else None,
+                    else None
+                ),
 
-                "created_at":
+                "created_at": (
                     d.created_at.isoformat()
                     if d.created_at
-                    else None,
+                    else None
+                ),
 
-                "updated_at":
+                "updated_at": (
                     d.updated_at.isoformat()
                     if d.updated_at
                     else None
+                )
             }
             for d in detalles
         ],
 
-        "has_more":
-            len(detalles) == limit
+        "has_more": len(detalles) == limit
     }
-
+    
 @app.get("/sync/unidades_medida/changes")
 async def unidades_medida_changes(
     empresa_uuid: str,
@@ -13991,7 +14041,6 @@ async def restore_venta_detalles_changes(
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
-
     if not authorization:
         raise HTTPException(
             status_code=401,
@@ -14021,7 +14070,6 @@ async def restore_venta_detalles_changes(
     )
 
     result = await db.execute(query)
-
     detalles = result.scalars().all()
 
     return {
@@ -14029,57 +14077,72 @@ async def restore_venta_detalles_changes(
             {
                 "id": str(d.id),
 
-                "empresa_uuid":
-                    d.empresa_uuid,
+                "empresa_uuid": d.empresa_uuid,
 
-                "venta_id":
+                "venta_id": (
                     str(d.venta_id)
                     if d.venta_id
-                    else None,
+                    else None
+                ),
 
-                "producto_id":
-                    str(d.producto_id),
+                "producto_id": str(d.producto_id),
 
-                "cantidad":
-                    float(d.cantidad or 0),
+                "cantidad": float(d.cantidad or 0),
 
-                "precio_unitario":
-                    float(d.precio_unitario or 0),
+                "precio_unitario": float(
+                    d.precio_unitario or 0
+                ),
 
-                "subtotal":
-                    float(d.subtotal or 0),
+                "subtotal": float(d.subtotal or 0),
 
-                "sync_status":
-                    d.sync_status,
+                "descuento_tipo": d.descuento_tipo,
 
-                "version":
-                    d.version,
+                "descuento_porcentaje": float(
+                    d.descuento_porcentaje or 0
+                ),
 
-                "sync_cursor":
-                    d.sync_cursor,
+                "descuento_monto": float(
+                    d.descuento_monto or 0
+                ),
 
-                "updated_at":
+                "descuentos_promocionales": (
+                    d.descuentos_promocionales or []
+                ),
+
+                "tasa_itbis": float(
+                    d.tasa_itbis or 0
+                ),
+
+                "sync_status": d.sync_status,
+
+                "version": d.version,
+
+                "sync_cursor": d.sync_cursor,
+
+                "updated_at": (
                     d.updated_at.isoformat()
                     if d.updated_at
-                    else None,
+                    else None
+                ),
 
-                "created_at":
+                "created_at": (
                     d.created_at.isoformat()
                     if d.created_at
-                    else None,
+                    else None
+                ),
 
-                "deleted_at":
+                "deleted_at": (
                     d.deleted_at.isoformat()
                     if d.deleted_at
                     else None
+                )
             }
             for d in detalles
         ],
 
-        "has_more":
-            len(detalles) == limit
+        "has_more": len(detalles) == limit
     }
-    
+      
 @app.get("/restore/ventas/changes")
 async def restore_ventas_changes(
     empresa_uuid: str,

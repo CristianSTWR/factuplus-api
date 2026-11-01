@@ -986,6 +986,41 @@ class VentaDetalle(Base):
         nullable=False
     )
 
+    descuento_tipo: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        default="monto",
+        server_default=text("'monto'")
+    )
+
+    descuento_porcentaje: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        nullable=False,
+        default=Decimal("0"),
+        server_default=text("0")
+    )
+
+    descuento_monto: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False,
+        default=Decimal("0"),
+        server_default=text("0")
+    )
+
+    descuentos_promocionales: Mapped[dict | list] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'::jsonb")
+    )
+
+    tasa_itbis: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        nullable=False,
+        default=Decimal("0"),
+        server_default=text("0")
+    )
+
     sync_status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
@@ -1016,12 +1051,12 @@ class VentaDetalle(Base):
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP")
     )
-    
+
     sync_cursor: Mapped[int] = mapped_column(
-                        BigInteger,
-                        unique=True,
-                        nullable=False
-                    )
+        BigInteger,
+        unique=True,
+        nullable=False
+    )
     
 class Pago(Base):
 
