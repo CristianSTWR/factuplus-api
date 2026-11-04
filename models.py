@@ -1,10 +1,11 @@
 # models.py
 from sqlalchemy import JSON
-from datetime import datetime
+from datetime import datetime, date
 from decimal import Decimal
 from sqlalchemy import (
     Boolean, DateTime, Integer, String, Numeric, Enum, SmallInteger, Date,
-    ForeignKey, UniqueConstraint, func, text, BigInteger, Text, CheckConstraint
+    ForeignKey, UniqueConstraint, func, text, BigInteger, Text, CheckConstraint,
+    Index
 )
 
 import enum
@@ -3582,6 +3583,155 @@ class GastoObligacion(Base):
     )
     
  """
+ 
+ 
+class SecuenciaECF(Base):
+
+    __tablename__ = "secuencias_ecf"
+
+    __table_args__ = (
+
+        UniqueConstraint(
+            "empresa_uuid",
+            "tipo_ecf",
+            name="secuencias_ecf_tipo_empresa_unique"
+        ),
+
+        CheckConstraint(
+            "numero_inicial >= 0",
+            name="secuencias_ecf_numero_inicial_check"
+        ),
+
+        CheckConstraint(
+            "numero_final >= numero_inicial",
+            name="secuencias_ecf_numero_final_check"
+        ),
+
+        CheckConstraint(
+            "ultimo_numero >= 0 AND ultimo_numero <= numero_final",
+            name="secuencias_ecf_ultimo_numero_check"
+        ),
+
+        CheckConstraint(
+            """
+            fecha_vencimiento IS NULL
+            OR fecha_inicio IS NULL
+            OR fecha_vencimiento >= fecha_inicio
+            """,
+            name="secuencias_ecf_fechas_check"
+        ),
+
+        Index(
+            "idx_secuencias_ecf_empresa",
+            "empresa_uuid"
+        ),
+
+        Index(
+            "idx_secuencias_ecf_empresa_activo",
+            "empresa_uuid",
+            "activo"
+        ),
+
+        Index(
+            "idx_secuencias_ecf_empresa_sync_cursor",
+            "empresa_uuid",
+            "sync_cursor"
+        )
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()")
+    )
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        Text,
+        nullable=False
+    )
+
+    tipo_ecf: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False
+    )
+
+    prefijo: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False
+    )
+
+    numero_inicial: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=1,
+        server_default=text("1")
+    )
+
+    numero_final: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False
+    )
+
+    ultimo_numero: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    fecha_inicio: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True
+    )
+
+    fecha_vencimiento: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True
+    )
+
+    activo: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true")
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="synced",
+        server_default=text("'synced'")
+    )
+
+    sync_cursor: Mapped[int | None] = mapped_column(
+        BigInteger,
+        nullable=True
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1")
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now()
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now()
+    )
+
 
 """ WEB PAGINA """
 

@@ -1,6 +1,6 @@
 # main.py (PostgreSQL + SQLAlchemy AsyncSession) — REPARADO
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 import logging
 import os
 import secrets
@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from sqlalchemy import select, and_, func, case, asc, update
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 import base64
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
@@ -76,7 +76,7 @@ import re
 # APLICACION
 from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, Producto, UnidadMedida, Rol, RolPermiso, UsuarioRol, MetodoPago, Cliente, Suplidor
 from models import Compra, CompraDetalle, VentaDetalle, Pago, HistorialStock, Devolucion, DevolucionDetalle, Cotizacion, CotizacionDetalle, Descuento, DescuentoCliente, DescuentoCondicion, DescuentoDia, DescuentoProducto
-
+from models import SecuenciaECF
 # WEB
 from models import ListaEspera, EmpresaDispositivo
 
@@ -16003,6 +16003,258 @@ async def abrir_cotizacion_publica(
             for detalle in detalles
         ],
     }
+    
+    
+""" Secuencias ECF """
+
+@app.post("/registrar-secuencia-ecf")
+async def registrar_secuencia_ecf(
+    payload: dict,
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        token = str(
+            payload.get("token") or ""
+        ).strip()
+
+        empresa_payload = str(
+            payload.get("empresa_uuid") or ""
+        ).strip()
+
+        if not token:
+            raise HTTPException(
+                status_code=401,
+                detail="Token requerido"
+            )
+
+        usuario_actual = await verificar_token(
+            token,
+            db
+        )
+
+        empresa_uuid = str(
+            usuario_actual.empresa_uuid or ""
+        ).strip()
+
+        if not empresa_uuid:
+            raise HTTPException(
+                status_code=400,
+                detail="El usuario no tiene una empresa asignada"
+            )
+
+        if empresa_payload != empresa_uuid:
+            raise HTTPException(
+                status_code=403,
+                detail="La empresa no coincide con el usuario autenticado"
+            )
+
+        admin_result = await db.execute(
+            select(func.count())
+            .select_from(UsuarioRol)
+            .join(
+                Rol,
+                Rol.id == UsuarioRol.rol_id
+            )
+            .where(
+                UsuarioRol.usuario_id == usuario_actual.id,
+                UsuarioRol.empresa_uuid == empresa_uuid,
+                UsuarioRol.deleted_at.is_(None),
+                Rol.empresa_uuid == empresa_uuid,
+                Rol.deleted_at.is_(None),
+                Rol.nivel == 1
+            )
+        )
+
+        es_administrador = (
+            admin_result.scalar() or 0
+        ) > 0
+
+        if not es_administrador:
+            raise HTTPException(
+                status_code=403,
+                detail="No tienes permisos para registrar secuencias e-CF"
+            )
+
+        tipo_ecf = str(
+            payload.get("tipo_ecf") or ""
+        ).strip().upper()
+
+        tipos_validos = {
+            "E31",
+            "E32",
+            "E33",
+            "E34",
+            "E41",
+            "E43",
+            "E44",
+            "E45",
+            "E46",
+            "E47"
+        }
+
+        if tipo_ecf not in tipos_validos:
+            raise HTTPException(
+                status_code=400,
+                detail="Tipo de comprobante e-CF no válido"
+            )
+
+        try:
+            numero_inicial = int(
+                payload.get("numero_inicial")
+            )
+
+            numero_final = int(
+                payload.get("numero_final")
+            )
+
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail="Los números de la secuencia no son válidos"
+            )
+
+        if (
+            isinstance(payload.get("numero_inicial"), bool)
+            or isinstance(payload.get("numero_final"), bool)
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Los números de la secuencia no son válidos"
+            )
+
+        if (
+            numero_inicial < 1
+            or numero_inicial > 9999999999
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="El número inicial no es válido"
+            )
+
+        if (
+            numero_final < numero_inicial
+            or numero_final > 9999999999
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="El número final no es válido"
+            )
+
+        try:
+            fecha_inicio = date.fromisoformat(
+                str(payload.get("fecha_inicio") or "")
+            )
+
+            fecha_vencimiento = date.fromisoformat(
+                str(payload.get("fecha_vencimiento") or "")
+            )
+
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail="Las fechas de la secuencia no son válidas"
+            )
+
+        if fecha_vencimiento < fecha_inicio:
+            raise HTTPException(
+                status_code=400,
+                detail="La fecha de vencimiento no puede ser anterior a la fecha de inicio"
+            )
+
+        activo = payload.get("activo", True)
+
+        if not isinstance(activo, bool):
+            raise HTTPException(
+                status_code=400,
+                detail="El estado de la secuencia no es válido"
+            )
+
+        secuencia_existente = await db.execute(
+            select(SecuenciaECF).where(
+                SecuenciaECF.empresa_uuid == empresa_uuid,
+                SecuenciaECF.tipo_ecf == tipo_ecf
+            )
+        )
+
+        if secuencia_existente.scalar_one_or_none():
+            raise HTTPException(
+                status_code=409,
+                detail=f"Ya existe una secuencia registrada para {tipo_ecf}"
+            )
+
+        nueva_secuencia = SecuenciaECF(
+            empresa_uuid=empresa_uuid,
+            tipo_ecf=tipo_ecf,
+            prefijo=tipo_ecf,
+            numero_inicial=numero_inicial,
+            numero_final=numero_final,
+            ultimo_numero=max(numero_inicial - 1, 0),
+            fecha_inicio=fecha_inicio,
+            fecha_vencimiento=fecha_vencimiento,
+            activo=activo,
+            sync_status="synced",
+            version=1,
+            deleted_at=None
+        )
+
+        db.add(nueva_secuencia)
+
+        await db.flush()
+        await db.commit()
+        await db.refresh(nueva_secuencia)
+
+        return {
+            "ok": True,
+            "message": "Secuencia e-CF registrada correctamente",
+            "secuencia": {
+                "id": str(nueva_secuencia.id),
+                "empresa_uuid": nueva_secuencia.empresa_uuid,
+                "tipo_ecf": nueva_secuencia.tipo_ecf,
+                "prefijo": nueva_secuencia.prefijo,
+                "numero_inicial": nueva_secuencia.numero_inicial,
+                "numero_final": nueva_secuencia.numero_final,
+                "ultimo_numero": nueva_secuencia.ultimo_numero,
+                "fecha_inicio": (
+                    nueva_secuencia.fecha_inicio.isoformat()
+                    if nueva_secuencia.fecha_inicio else None
+                ),
+                "fecha_vencimiento": (
+                    nueva_secuencia.fecha_vencimiento.isoformat()
+                    if nueva_secuencia.fecha_vencimiento else None
+                ),
+                "activo": nueva_secuencia.activo,
+                "sync_status": nueva_secuencia.sync_status,
+                "version": nueva_secuencia.version,
+                "created_at": (
+                    nueva_secuencia.created_at.isoformat()
+                    if nueva_secuencia.created_at else None
+                ),
+                "updated_at": (
+                    nueva_secuencia.updated_at.isoformat()
+                    if nueva_secuencia.updated_at else None
+                )
+            }
+        }
+
+    except HTTPException:
+        await db.rollback()
+        raise
+
+    except IntegrityError:
+        await db.rollback()
+
+        raise HTTPException(
+            status_code=409,
+            detail="Ya existe una secuencia para este tipo de comprobante en la empresa"
+        )
+
+    except Exception:
+        await db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Error registrando secuencia e-CF"
+        )
 
 """ WEBSCOKER """
 clientes_ws = {}
