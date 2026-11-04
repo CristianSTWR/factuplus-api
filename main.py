@@ -16297,33 +16297,6 @@ async def consultar_secuencias_ecf(
                 detail="La empresa no coincide con el usuario autenticado"
             )
 
-        admin_result = await db.execute(
-            select(func.count())
-            .select_from(UsuarioRol)
-            .join(
-                Rol,
-                Rol.id == UsuarioRol.rol_id
-            )
-            .where(
-                UsuarioRol.usuario_id == usuario_actual.id,
-                UsuarioRol.empresa_uuid == empresa_uuid,
-                UsuarioRol.deleted_at.is_(None),
-                Rol.empresa_uuid == empresa_uuid,
-                Rol.deleted_at.is_(None),
-                Rol.nivel == 1
-            )
-        )
-
-        es_administrador = (
-            admin_result.scalar() or 0
-        ) > 0
-
-        if not es_administrador:
-            raise HTTPException(
-                status_code=403,
-                detail="No tienes permisos para consultar las secuencias e-CF"
-            )
-
         resultado = await db.execute(
             select(SecuenciaECF)
             .where(
@@ -16421,14 +16394,19 @@ async def consultar_secuencias_ecf(
         await db.rollback()
         raise
 
-    except Exception:
+    except Exception as e:
         await db.rollback()
+
+        print(
+            "ERROR CONSULTANDO SECUENCIAS E-CF:",
+            repr(e)
+        )
 
         raise HTTPException(
             status_code=500,
             detail="Error consultando las secuencias e-CF"
         )
-
+        
 """ WEBSCOKER """
 clientes_ws = {}
 
