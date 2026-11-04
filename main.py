@@ -19,7 +19,18 @@ from fastapi import FastAPI, Request, Response, Depends, HTTPException, status, 
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-from sqlalchemy import select, and_, func, case, asc, update
+from sqlalchemy import (
+    select,
+    and_,
+    or_,
+    func,
+    case,
+    asc,
+    update,
+    cast,
+    String
+)
+
 from sqlalchemy.exc import DBAPIError, IntegrityError
 import base64
 from fastapi import APIRouter, Request
@@ -16297,15 +16308,208 @@ async def consultar_secuencias_ecf(
                 detail="La empresa no coincide con el usuario autenticado"
             )
 
-        resultado = await db.execute(
-            select(SecuenciaECF)
-            .where(
-                SecuenciaECF.empresa_uuid == empresa_uuid,
-                SecuenciaECF.deleted_at.is_(None)
+ 
+        busqueda = str(
+            payload.get("busqueda") or ""
+        ).strip()
+
+        tipo_ecf = str(
+            payload.get("tipo_ecf") or "Todos"
+        ).strip().upper()
+
+        estado = str(
+            payload.get("estado") or "Todos"
+        ).strip().lower()
+
+        try:
+            pagina = max(
+                1,
+                int(payload.get("pagina") or 1)
             )
+
+            por_pagina = min(
+                100,
+                max(
+                    1,
+                    int(payload.get("porPagina") or 10)
+                )
+            )
+
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail="Los parámetros de paginación no son válidos"
+            )
+
+        estados_validos = {
+            "todos",
+            "activas",
+            "inactivas",
+            "agotadas",
+            "vencidas",
+            "pendientes"
+        }
+
+        if estado not in estados_validos:
+            raise HTTPException(
+                status_code=400,
+                detail="El filtro de estado no es válido"
+            )
+
+        hoy = datetime.now(
+            ZoneInfo("America/Santo_Domingo")
+        ).date()
+
+  
+        ultimo_numero_expr = func.coalesce(
+            SecuenciaECF.ultimo_numero,
+            0
+        )
+
+        proximo_numero_expr = func.greatest(
+            SecuenciaECF.numero_inicial,
+            ultimo_numero_expr + 1
+        )
+
+        vencimiento_no_superado = or_(
+            SecuenciaECF.fecha_vencimiento.is_(None),
+            SecuenciaECF.fecha_vencimiento >= hoy
+        )
+
+        inicio_no_futuro = or_(
+            SecuenciaECF.fecha_inicio.is_(None),
+            SecuenciaECF.fecha_inicio <= hoy
+        )
+
+        inicio_futuro = (
+            SecuenciaECF.fecha_inicio > hoy
+        )
+
+        secuencia_agotada = (
+            proximo_numero_expr >
+            SecuenciaECF.numero_final
+        )
+
+        secuencia_disponible = (
+            proximo_numero_expr <=
+            SecuenciaECF.numero_final
+        )
+
+
+        consulta = select(SecuenciaECF).where(
+            SecuenciaECF.empresa_uuid == empresa_uuid,
+            SecuenciaECF.deleted_at.is_(None)
+        )
+        
+        if tipo_ecf != "TODOS":
+            consulta = consulta.where(
+                SecuenciaECF.tipo_ecf == tipo_ecf
+            )
+
+        if busqueda:
+
+            patron = f"%{busqueda}%"
+
+            encf_proximo_expr = func.concat(
+                SecuenciaECF.prefijo,
+                func.lpad(
+                    cast(proximo_numero_expr, String),
+                    10,
+                    "0"
+                )
+            )
+
+            consulta = consulta.where(
+                or_(
+                    SecuenciaECF.tipo_ecf.ilike(patron),
+                    SecuenciaECF.prefijo.ilike(patron),
+
+                    cast(
+                        SecuenciaECF.numero_inicial,
+                        String
+                    ).ilike(patron),
+
+                    cast(
+                        SecuenciaECF.numero_final,
+                        String
+                    ).ilike(patron),
+
+                    cast(
+                        SecuenciaECF.ultimo_numero,
+                        String
+                    ).ilike(patron),
+
+                    cast(
+                        SecuenciaECF.fecha_inicio,
+                        String
+                    ).ilike(patron),
+
+                    cast(
+                        SecuenciaECF.fecha_vencimiento,
+                        String
+                    ).ilike(patron),
+
+                    encf_proximo_expr.ilike(patron)
+                )
+            )
+        if estado == "activas":
+
+            consulta = consulta.where(
+                SecuenciaECF.activo.is_(True),
+                vencimiento_no_superado,
+                inicio_no_futuro,
+                secuencia_disponible
+            )
+
+        elif estado == "inactivas":
+
+            consulta = consulta.where(
+                SecuenciaECF.activo.is_(False)
+            )
+
+        elif estado == "vencidas":
+
+            consulta = consulta.where(
+                SecuenciaECF.activo.is_(True),
+                SecuenciaECF.fecha_vencimiento.is_not(None),
+                SecuenciaECF.fecha_vencimiento < hoy
+            )
+
+        elif estado == "pendientes":
+
+            consulta = consulta.where(
+                SecuenciaECF.activo.is_(True),
+                vencimiento_no_superado,
+                inicio_futuro
+            )
+
+        elif estado == "agotadas":
+
+            consulta = consulta.where(
+                SecuenciaECF.activo.is_(True),
+                vencimiento_no_superado,
+                inicio_no_futuro,
+                secuencia_agotada
+            )
+
+        resultado_total = await db.execute(
+            select(func.count())
+            .select_from(
+                consulta.order_by(None).subquery()
+            )
+        )
+
+        total = resultado_total.scalar_one() or 0
+
+        resultado = await db.execute(
+            consulta
             .order_by(
                 SecuenciaECF.tipo_ecf.asc()
             )
+            .offset(
+                (pagina - 1) * por_pagina
+            )
+            .limit(por_pagina)
         )
 
         secuencias = resultado.scalars().all()
@@ -16323,6 +16527,11 @@ async def consultar_secuencias_ecf(
                 ultimo_numero + 1
             )
 
+            agotada = (
+                proximo_numero >
+                secuencia.numero_final
+            )
+
             numeros_disponibles = max(
                 0,
                 secuencia.numero_final - max(
@@ -16333,7 +16542,9 @@ async def consultar_secuencias_ecf(
 
             datos.append({
                 "id": str(secuencia.id),
+
                 "empresa_uuid": secuencia.empresa_uuid,
+
                 "tipo_ecf": secuencia.tipo_ecf,
                 "prefijo": secuencia.prefijo,
 
@@ -16343,7 +16554,7 @@ async def consultar_secuencias_ecf(
 
                 "proximo_numero": (
                     proximo_numero
-                    if proximo_numero <= secuencia.numero_final
+                    if not agotada
                     else None
                 ),
 
@@ -16363,9 +16574,7 @@ async def consultar_secuencias_ecf(
 
                 "activo": secuencia.activo,
 
-                "agotada": (
-                    proximo_numero > secuencia.numero_final
-                ),
+                "agotada": agotada,
 
                 "sync_status": secuencia.sync_status,
                 "sync_cursor": secuencia.sync_cursor,
@@ -16386,7 +16595,9 @@ async def consultar_secuencias_ecf(
 
         return {
             "ok": True,
-            "total": len(datos),
+            "total": total,
+            "pagina": pagina,
+            "porPagina": por_pagina,
             "secuencias": datos
         }
 
@@ -16406,7 +16617,7 @@ async def consultar_secuencias_ecf(
             status_code=500,
             detail="Error consultando las secuencias e-CF"
         )
-        
+                
 """ WEBSCOKER """
 clientes_ws = {}
 
