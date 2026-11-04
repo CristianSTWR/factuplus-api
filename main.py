@@ -16256,6 +16256,179 @@ async def registrar_secuencia_ecf(
             detail="Error registrando secuencia e-CF"
         )
 
+@app.post("/consultar-secuencias-ecf")
+async def consultar_secuencias_ecf(
+    payload: dict,
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        token = str(
+            payload.get("token") or ""
+        ).strip()
+
+        empresa_payload = str(
+            payload.get("empresa_uuid") or ""
+        ).strip()
+
+        if not token:
+            raise HTTPException(
+                status_code=401,
+                detail="Token requerido"
+            )
+
+        usuario_actual = await verificar_token(
+            token,
+            db
+        )
+
+        empresa_uuid = str(
+            usuario_actual.empresa_uuid or ""
+        ).strip()
+
+        if not empresa_uuid:
+            raise HTTPException(
+                status_code=400,
+                detail="El usuario no tiene una empresa asignada"
+            )
+
+        if empresa_payload != empresa_uuid:
+            raise HTTPException(
+                status_code=403,
+                detail="La empresa no coincide con el usuario autenticado"
+            )
+
+        admin_result = await db.execute(
+            select(func.count())
+            .select_from(UsuarioRol)
+            .join(
+                Rol,
+                Rol.id == UsuarioRol.rol_id
+            )
+            .where(
+                UsuarioRol.usuario_id == usuario_actual.id,
+                UsuarioRol.empresa_uuid == empresa_uuid,
+                UsuarioRol.deleted_at.is_(None),
+                Rol.empresa_uuid == empresa_uuid,
+                Rol.deleted_at.is_(None),
+                Rol.nivel == 1
+            )
+        )
+
+        es_administrador = (
+            admin_result.scalar() or 0
+        ) > 0
+
+        if not es_administrador:
+            raise HTTPException(
+                status_code=403,
+                detail="No tienes permisos para consultar las secuencias e-CF"
+            )
+
+        resultado = await db.execute(
+            select(SecuenciaECF)
+            .where(
+                SecuenciaECF.empresa_uuid == empresa_uuid,
+                SecuenciaECF.deleted_at.is_(None)
+            )
+            .order_by(
+                SecuenciaECF.tipo_ecf.asc()
+            )
+        )
+
+        secuencias = resultado.scalars().all()
+
+        datos = []
+
+        for secuencia in secuencias:
+
+            ultimo_numero = (
+                secuencia.ultimo_numero or 0
+            )
+
+            proximo_numero = max(
+                secuencia.numero_inicial,
+                ultimo_numero + 1
+            )
+
+            numeros_disponibles = max(
+                0,
+                secuencia.numero_final - max(
+                    ultimo_numero,
+                    secuencia.numero_inicial - 1
+                )
+            )
+
+            datos.append({
+                "id": str(secuencia.id),
+                "empresa_uuid": secuencia.empresa_uuid,
+                "tipo_ecf": secuencia.tipo_ecf,
+                "prefijo": secuencia.prefijo,
+
+                "numero_inicial": secuencia.numero_inicial,
+                "numero_final": secuencia.numero_final,
+                "ultimo_numero": ultimo_numero,
+
+                "proximo_numero": (
+                    proximo_numero
+                    if proximo_numero <= secuencia.numero_final
+                    else None
+                ),
+
+                "numeros_disponibles": numeros_disponibles,
+
+                "fecha_inicio": (
+                    secuencia.fecha_inicio.isoformat()
+                    if secuencia.fecha_inicio
+                    else None
+                ),
+
+                "fecha_vencimiento": (
+                    secuencia.fecha_vencimiento.isoformat()
+                    if secuencia.fecha_vencimiento
+                    else None
+                ),
+
+                "activo": secuencia.activo,
+
+                "agotada": (
+                    proximo_numero > secuencia.numero_final
+                ),
+
+                "sync_status": secuencia.sync_status,
+                "sync_cursor": secuencia.sync_cursor,
+                "version": secuencia.version,
+
+                "created_at": (
+                    secuencia.created_at.isoformat()
+                    if secuencia.created_at
+                    else None
+                ),
+
+                "updated_at": (
+                    secuencia.updated_at.isoformat()
+                    if secuencia.updated_at
+                    else None
+                )
+            })
+
+        return {
+            "ok": True,
+            "total": len(datos),
+            "secuencias": datos
+        }
+
+    except HTTPException:
+        await db.rollback()
+        raise
+
+    except Exception:
+        await db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Error consultando las secuencias e-CF"
+        )
+
 """ WEBSCOKER """
 clientes_ws = {}
 
