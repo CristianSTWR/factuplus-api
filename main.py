@@ -16617,6 +16617,320 @@ async def consultar_secuencias_ecf(
             status_code=500,
             detail="Error consultando las secuencias e-CF"
         )
+
+@app.post("/asignar-ecf")
+async def asignar_ecf(
+    payload: dict,
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        token = str(payload.get("token") or "").strip()
+        empresa_payload = str(payload.get("empresa_uuid") or "").strip()
+        venta_id = str(payload.get("venta_id") or "").strip()
+        tipo_ecf = str(payload.get("tipo_ecf") or "").strip().upper()
+
+        if not token:
+            raise HTTPException(
+                status_code=401,
+                detail="Token no proporcionado"
+            )
+
+        if not venta_id:
+            raise HTTPException(
+                status_code=400,
+                detail="No se proporcionó el ID de la venta"
+            )
+
+        if not empresa_payload:
+            raise HTTPException(
+                status_code=400,
+                detail="No se proporcionó la empresa"
+            )
+
+        tipos_permitidos = {
+            "E31", "E32", "E33", "E34",
+            "E41", "E43", "E44", "E45",
+            "E46", "E47"
+        }
+
+        if tipo_ecf not in tipos_permitidos:
+            raise HTTPException(
+                status_code=400,
+                detail="Tipo de e-CF no permitido"
+            )
+
+        usuario_actual = await verificar_token(token, db)
+
+        empresa_uuid = str(
+            usuario_actual.empresa_uuid or ""
+        ).strip()
+
+        if not empresa_uuid:
+            raise HTTPException(
+                status_code=400,
+                detail="El usuario no tiene una empresa asignada"
+            )
+
+        if empresa_payload != empresa_uuid:
+            raise HTTPException(
+                status_code=403,
+                detail="La empresa no corresponde al usuario autenticado"
+            )
+
+        # Una venta solamente puede tener una asignación.
+        idempotency_key = f"venta:{venta_id}"
+
+        print(
+            f"[ECF] Solicitud de asignación: "
+            f"empresa={empresa_uuid}, venta={venta_id}, tipo={tipo_ecf}"
+        )
+
+        # Serializa solicitudes simultáneas para la misma venta.
+        await db.execute(
+            text("""
+                SELECT pg_advisory_xact_lock(
+                    hashtextextended(:lock_key, 0)
+                )
+            """),
+            {
+                "lock_key": f"{empresa_uuid}:{idempotency_key}"
+            }
+        )
+
+        # Primero comprobamos si la venta ya tiene un e-NCF.
+        existente_result = await db.execute(
+            text("""
+                SELECT
+                    a.id,
+                    a.secuencia_id,
+                    a.tipo_ecf,
+                    a.numero,
+                    a.encf,
+                    a.estado,
+                    s.fecha_vencimiento
+                FROM ecf_asignaciones a
+                INNER JOIN secuencias_ecf s
+                    ON s.id = a.secuencia_id
+                WHERE a.empresa_uuid = :empresa_uuid
+                  AND a.idempotency_key = :idempotency_key
+                LIMIT 1
+            """),
+            {
+                "empresa_uuid": empresa_uuid,
+                "idempotency_key": idempotency_key
+            }
+        )
+
+        existente = existente_result.mappings().first()
+
+        if existente:
+            if existente["tipo_ecf"] != tipo_ecf:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Esta venta ya tiene asignado un e-NCF "
+                        "de otro tipo"
+                    )
+                )
+
+            await db.commit()
+
+            print(
+                "[ECF] Recuperando asignación existente:",
+                existente["encf"]
+            )
+
+            return {
+                "ok": True,
+                "existing": True,
+                "asignacion_id": str(existente["id"]),
+                "secuencia_id": str(existente["secuencia_id"]),
+                "tipo_ecf": existente["tipo_ecf"],
+                "numero": int(existente["numero"]),
+                "encf": existente["encf"],
+                "estado": existente["estado"],
+                "fecha_vencimiento": (
+                    existente["fecha_vencimiento"].isoformat()
+                    if existente["fecha_vencimiento"]
+                    else None
+                )
+            }
+
+        # Obtener y bloquear la secuencia central.
+        resultado = await db.execute(
+            select(SecuenciaECF)
+            .where(
+                SecuenciaECF.empresa_uuid == empresa_uuid,
+                SecuenciaECF.tipo_ecf == tipo_ecf,
+                SecuenciaECF.activo.is_(True),
+                SecuenciaECF.deleted_at.is_(None)
+            )
+            .with_for_update()
+        )
+
+        secuencia = resultado.scalar_one_or_none()
+
+        if not secuencia:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No existe una secuencia activa para {tipo_ecf}"
+            )
+
+        # Comprobar fechas utilizando la zona horaria dominicana.
+        hoy = datetime.now(
+            ZoneInfo("America/Santo_Domingo")
+        ).date()
+
+        fecha_inicio = secuencia.fecha_inicio
+        fecha_vencimiento = secuencia.fecha_vencimiento
+
+        if fecha_inicio and fecha_inicio > hoy:
+            raise HTTPException(
+                status_code=409,
+                detail=f"La secuencia {tipo_ecf} todavía no está vigente"
+            )
+
+        if not fecha_vencimiento or fecha_vencimiento < hoy:
+            raise HTTPException(
+                status_code=409,
+                detail=f"La secuencia {tipo_ecf} está vencida o no tiene vencimiento configurado"
+            )
+
+        # Calcular el siguiente número disponible.
+        numero_inicial = int(secuencia.numero_inicial)
+        numero_final = int(secuencia.numero_final)
+        ultimo_numero = int(secuencia.ultimo_numero or 0)
+
+        siguiente = max(
+            numero_inicial,
+            ultimo_numero + 1
+        )
+
+        if siguiente > numero_final:
+            raise HTTPException(
+                status_code=409,
+                detail=f"La secuencia {tipo_ecf} está agotada"
+            )
+
+        prefijo = str(secuencia.prefijo or "").strip()
+
+        if not prefijo:
+            raise HTTPException(
+                status_code=409,
+                detail=f"La secuencia {tipo_ecf} no tiene prefijo configurado"
+            )
+
+        encf = f"{prefijo}{str(siguiente).zfill(10)}"
+
+        print("[ECF] Secuencia bloqueada:", secuencia.id)
+        print("[ECF] Número que se asignará:", siguiente)
+        print("[ECF] e-NCF:", encf)
+
+        # Actualizar el contador de la secuencia.
+        secuencia.ultimo_numero = siguiente
+        secuencia.updated_at = datetime.now(ZoneInfo("UTC"))
+
+        await db.flush()
+
+        # Registrar la asignación.
+        asignacion_result = await db.execute(
+            text("""
+                INSERT INTO ecf_asignaciones (
+                    empresa_uuid,
+                    secuencia_id,
+                    tipo_ecf,
+                    numero,
+                    encf,
+                    factura_uuid,
+                    idempotency_key,
+                    estado
+                )
+                VALUES (
+                    :empresa_uuid,
+                    :secuencia_id,
+                    :tipo_ecf,
+                    :numero,
+                    :encf,
+                    NULL,
+                    :idempotency_key,
+                    'asignado'
+                )
+                RETURNING id
+            """),
+            {
+                "empresa_uuid": empresa_uuid,
+                "secuencia_id": secuencia.id,
+                "tipo_ecf": tipo_ecf,
+                "numero": siguiente,
+                "encf": encf,
+                "idempotency_key": idempotency_key
+            }
+        )
+
+        asignacion_id = asignacion_result.scalar_one()
+
+        # Registrar historial.
+        await db.execute(
+            text("""
+                INSERT INTO ecf_asignaciones_historial (
+                    asignacion_id,
+                    estado_anterior,
+                    estado_nuevo,
+                    detalle
+                )
+                VALUES (
+                    :asignacion_id,
+                    NULL,
+                    'asignado',
+                    :detalle
+                )
+            """),
+            {
+                "asignacion_id": asignacion_id,
+                "detalle": f"e-NCF asignado a la venta {venta_id}"
+            }
+        )
+
+        # Confirmar secuencia, asignación e historial juntos.
+        await db.commit()
+
+        print("[ECF] Asignación confirmada:", encf)
+
+        return {
+            "ok": True,
+            "existing": False,
+            "asignacion_id": str(asignacion_id),
+            "secuencia_id": str(secuencia.id),
+            "tipo_ecf": tipo_ecf,
+            "numero": siguiente,
+            "encf": encf,
+            "estado": "asignado",
+            "fecha_vencimiento": fecha_vencimiento.isoformat()
+        }
+
+    except HTTPException:
+        await db.rollback()
+        raise
+
+    except IntegrityError as e:
+        await db.rollback()
+
+        print("[ECF] Error de integridad:", repr(e))
+
+        raise HTTPException(
+            status_code=409,
+            detail="No se pudo completar la asignación por un conflicto de registros"
+        )
+
+    except Exception as e:
+        await db.rollback()
+
+        print("[ECF] ERROR ASIGNANDO E-CF:", repr(e))
+
+        raise HTTPException(
+            status_code=500,
+            detail="Error interno asignando el e-NCF"
+        )
                 
 """ WEBSCOKER """
 clientes_ws = {}
