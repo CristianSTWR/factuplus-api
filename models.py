@@ -5,7 +5,7 @@ from decimal import Decimal
 from sqlalchemy import (
     Boolean, DateTime, Integer, String, Numeric, Enum, SmallInteger, Date,
     ForeignKey, UniqueConstraint, func, text, BigInteger, Text, CheckConstraint,
-    Index
+    Index, CHAR
 )
 
 import enum
@@ -3727,6 +3727,386 @@ class SecuenciaECF(Base):
     )
 
     updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now()
+    )
+    
+""" Receptor de la DGII """
+
+
+class EcfFirmadorTicket(Base):
+
+    __tablename__ = "ecf_firmador_tickets"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "ticket_hash",
+            name="ecf_firmador_tickets_hash_unique"
+        ),
+
+        Index(
+            "idx_ecf_firmador_tickets_expira",
+            "expires_at",
+            postgresql_where=text("consumed_at IS NULL")
+        )
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()")
+    )
+
+    ticket_hash: Mapped[str] = mapped_column(
+        CHAR(64),
+        nullable=False
+    )
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        Text,
+        nullable=False
+    )
+
+    dispositivo_uuid: Mapped[str] = mapped_column(
+        Text,
+        nullable=False
+    )
+
+    usuario_id: Mapped[str] = mapped_column(
+        Text,
+        nullable=False
+    )
+
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False
+    )
+
+    consumed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now()
+    )
+
+
+class EcfRecibido(Base):
+
+    __tablename__ = "ecf_recibidos"
+
+    __table_args__ = (
+
+        UniqueConstraint(
+            "empresa_uuid",
+            "rnc_emisor",
+            "encf",
+            name="uq_ecf_recibido_empresa_emisor_encf"
+        ),
+
+        CheckConstraint(
+            """
+            estado_procesamiento IN (
+                'recibido',
+                'validado',
+                'pendiente_revision',
+                'procesado',
+                'rechazado',
+                'error'
+            )
+            """,
+            name="chk_ecf_recibido_estado"
+        ),
+
+        Index(
+            "idx_ecf_recibidos_empresa_fecha",
+            "empresa_uuid",
+            "created_at"
+        )
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()")
+    )
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        Text,
+        nullable=False
+    )
+
+    tipo_ecf: Mapped[str] = mapped_column(
+        String(3),
+        nullable=False
+    )
+
+    rnc_emisor: Mapped[str] = mapped_column(
+        String(11),
+        nullable=False
+    )
+
+    rnc_comprador: Mapped[str] = mapped_column(
+        String(11),
+        nullable=False
+    )
+
+    encf: Mapped[str] = mapped_column(
+        String(13),
+        nullable=False
+    )
+
+    xml_original: Mapped[str] = mapped_column(
+        Text,
+        nullable=False
+    )
+
+    xml_sha256: Mapped[str] = mapped_column(
+        CHAR(64),
+        nullable=False
+    )
+
+    estado_procesamiento: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="pendiente_revision",
+        server_default=text("'pendiente_revision'")
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now()
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+
+
+class EcfAcuse(Base):
+
+    __tablename__ = "ecf_acuses"
+
+    __table_args__ = (
+
+        UniqueConstraint(
+            "ecf_recibido_id",
+            name="uq_ecf_acuses_recibido"
+        ),
+
+        CheckConstraint(
+            """
+            estado IN (
+                'pendiente_firmar',
+                'firmado',
+                'enviado',
+                'error'
+            )
+            """,
+            name="chk_ecf_acuse_estado"
+        ),
+
+        CheckConstraint(
+            """
+            codigo_estado IS NULL
+            OR codigo_estado IN (0, 1)
+            """,
+            name="chk_ecf_acuse_codigo"
+        ),
+
+        CheckConstraint(
+            """
+            codigo_motivo IS NULL
+            OR codigo_motivo BETWEEN 1 AND 4
+            """,
+            name="chk_ecf_acuse_motivo"
+        )
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()")
+    )
+
+    ecf_recibido_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "ecf_recibidos.id",
+            ondelete="CASCADE"
+        ),
+        nullable=False
+    )
+
+    estado: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="pendiente_firmar",
+        server_default=text("'pendiente_firmar'")
+    )
+
+    codigo_estado: Mapped[int | None] = mapped_column(
+        SmallInteger,
+        nullable=True
+    )
+
+    codigo_motivo: Mapped[int | None] = mapped_column(
+        SmallInteger,
+        nullable=True
+    )
+
+    xml_arecf_firmado: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    fecha_generacion: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    fecha_envio: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    error_detalle: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now()
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+
+
+class EcfRecepcionIntento(Base):
+
+    __tablename__ = "ecf_recepcion_intentos"
+
+    __table_args__ = (
+
+        CheckConstraint(
+            """
+            estado IN (
+                'recibido',
+                'procesado',
+                'duplicado',
+                'rechazado',
+                'error'
+            )
+            """,
+            name="chk_ecf_recepcion_intento_estado"
+        ),
+
+        Index(
+            "idx_ecf_recepcion_intentos_empresa_fecha",
+            "empresa_uuid",
+            "fecha_recepcion"
+        ),
+
+        Index(
+            "idx_ecf_recepcion_intentos_documento",
+            "rnc_emisor",
+            "encf"
+        )
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()")
+    )
+
+    empresa_uuid: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    ecf_recibido_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "ecf_recibidos.id",
+            ondelete="SET NULL"
+        ),
+        nullable=True
+    )
+
+    rnc_emisor: Mapped[str | None] = mapped_column(
+        String(11),
+        nullable=True
+    )
+
+    rnc_comprador: Mapped[str | None] = mapped_column(
+        String(11),
+        nullable=True
+    )
+
+    encf: Mapped[str | None] = mapped_column(
+        String(13),
+        nullable=True
+    )
+
+    xml_sha256: Mapped[str] = mapped_column(
+        CHAR(64),
+        nullable=False
+    )
+
+    xml_original: Mapped[str] = mapped_column(
+        Text,
+        nullable=False
+    )
+
+    estado: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="recibido",
+        server_default=text("'recibido'")
+    )
+
+    codigo_respuesta: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True
+    )
+
+    detalle_respuesta: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    http_status: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True
+    )
+
+    detalle: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    xml_arecf_firmado: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    fecha_recepcion: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now()
