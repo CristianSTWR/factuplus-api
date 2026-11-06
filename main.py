@@ -44,6 +44,11 @@ import random
 from zoneinfo import ZoneInfo
 from fastapi import WebSocket, WebSocketDisconnect
 
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from cryptography.hazmat.primitives.serialization.pkcs12 import load_key_and_certificates
+from cryptography.hazmat.primitives import hashes
+from cryptography.x509.oid import NameOID
 
 pwd_context = CryptContext(
     schemes=["bcrypt"],
@@ -461,6 +466,90 @@ async def validate(
     await ensure_license_ok(db, lic_key, req.deviceId)
 
     return {"ok": True}
+
+def _ecf_obtener_clave_maestra():
+
+    valor = os.getenv("ECF_CERT_MASTER_KEY", "").strip()
+
+    if not valor:
+        raise RuntimeError(
+            "ECF_CERT_MASTER_KEY no está configurada"
+        )
+
+    try:
+        clave = base64.b64decode(
+            valor,
+            validate=True
+        )
+
+    except Exception:
+        raise RuntimeError(
+            "ECF_CERT_MASTER_KEY no contiene Base64 válido"
+        )
+
+    if len(clave) != 32:
+        raise RuntimeError(
+            "ECF_CERT_MASTER_KEY debe contener exactamente 32 bytes"
+        )
+
+    return clave
+
+
+def _ecf_cifrar_certificado(
+    certificado_bytes: bytes,
+    cert_password: str,
+    empresa_uuid: str,
+    certificado_id: str
+):
+
+    clave_maestra = _ecf_obtener_clave_maestra()
+
+    clave_datos = secrets.token_bytes(32)
+
+    aad = (
+        f"factuplus:ecf-cert:v1:"
+        f"{empresa_uuid}:{certificado_id}"
+    ).encode("utf-8")
+
+    paquete = json.dumps(
+        {
+            "pkcs12_b64": base64.b64encode(
+                certificado_bytes
+            ).decode("ascii"),
+            "password": cert_password
+        },
+        separators=(",", ":"),
+        ensure_ascii=False
+    ).encode("utf-8")
+
+    payload_nonce = secrets.token_bytes(12)
+
+    payload_cifrado = AESGCM(
+        clave_datos
+    ).encrypt(
+        payload_nonce,
+        paquete,
+        aad
+    )
+
+    dek_nonce = secrets.token_bytes(12)
+
+    dek_cifrada = AESGCM(
+        clave_maestra
+    ).encrypt(
+        dek_nonce,
+        clave_datos,
+        aad
+    )
+
+    return {
+        "payload_cifrado": payload_cifrado,
+        "payload_nonce": payload_nonce,
+        "dek_cifrada": dek_cifrada,
+        "dek_nonce": dek_nonce,
+        "key_provider": "local-env-envelope-v1",
+        "key_version": 1
+    }
 
 # Get planes
 @app.get("/plans/{plan_key}")
@@ -17847,7 +17936,653 @@ async def recibir_ecf_factuplus(
                 detail="No se pudo completar la recepción del e-CF"
             )
 
-              
+""" @app.post("/fe/aprobacioncomercial/api/ecf")
+async def recibir_aprobacion_comercial(
+    request: Request,
+    xml: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db)
+):
+    _rate_limit(request, limiter_webhook)
+
+    contenido = await xml.read(
+        _ACECF_MAX_XML_BYTES + 1
+    )
+
+    if not contenido:
+        raise HTTPException(
+            status_code=400,
+            detail="El archivo ACECF está vacío"
+        )
+
+    if len(contenido) > _ACECF_MAX_XML_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="El archivo ACECF supera el tamaño permitido"
+        )
+
+    contenido_mayus = contenido.upper()
+
+    if (
+        b"<!DOCTYPE" in contenido_mayus
+        or b"<!ENTITY" in contenido_mayus
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="No se permiten declaraciones DTD ni entidades XML"
+        )
+
+    try:
+        root, certificado_sn = (
+            _acecf_validar_xsd_y_firma(contenido)
+        )
+
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc)
+        )
+
+    except RuntimeError as exc:
+        logger.exception("Error de configuración ACECF")
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc)
+        )
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc)
+        )
+
+    detalle = next(
+        (
+            elemento
+            for elemento in list(root)
+            if _ecf_local_name(elemento.tag)
+            == "detalleaprobacioncomercial"
+        ),
+        None
+    )
+
+    if detalle is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Falta DetalleAprobacionComercial"
+        )
+
+    version = _acecf_texto_directo(
+        detalle,
+        "Version"
+    )
+
+    rnc_emisor = _ecf_normalizar_rnc(
+        _acecf_texto_directo(detalle, "RNCEmisor")
+    )
+
+    rnc_comprador = _ecf_normalizar_rnc(
+        _acecf_texto_directo(detalle, "RNCComprador")
+    )
+
+    encf = str(
+        _acecf_texto_directo(detalle, "eNCF") or ""
+    ).strip().upper()
+
+    fecha_emision_raw = _acecf_texto_directo(
+        detalle,
+        "FechaEmision"
+    )
+
+    monto_total_raw = str(
+        _acecf_texto_directo(detalle, "MontoTotal") or ""
+    ).strip()
+
+    estado_raw = _acecf_texto_directo(
+        detalle,
+        "Estado"
+    )
+
+    motivo = _acecf_texto_directo(
+        detalle,
+        "DetalleMotivoRechazo"
+    )
+
+    fecha_aprobacion_raw = _acecf_texto_directo(
+        detalle,
+        "FechaHoraAprobacionComercial"
+    )
+
+    if version != "1.0":
+        raise HTTPException(
+            status_code=400,
+            detail="Versión ACECF no reconocida"
+        )
+
+    if len(rnc_emisor) not in (9, 11):
+        raise HTTPException(
+            status_code=400,
+            detail="RNCEmisor inválido"
+        )
+
+    if len(rnc_comprador) not in (9, 11):
+        raise HTTPException(
+            status_code=400,
+            detail="RNCComprador inválido"
+        )
+
+    if not _ecf_re.fullmatch(
+        r"E(?:31|32|33|34|41|43|44|45|46|47)\d{10}",
+        encf
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="e-NCF inválido"
+        )
+
+    if (
+        not monto_total_raw
+        or len(monto_total_raw) > 18
+        or not _ecf_re.fullmatch(
+            r"\d+(?:\.\d+)?",
+            monto_total_raw
+        )
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="MontoTotal inválido"
+        )
+
+    try:
+        monto_decimal = Decimal(
+            monto_total_raw
+        )
+
+        fecha_emision = datetime.strptime(
+            fecha_emision_raw or "",
+            "%d-%m-%Y"
+        ).date()
+
+        fecha_hora_aprobacion = datetime.strptime(
+            fecha_aprobacion_raw or "",
+            "%d-%m-%Y %H:%M:%S"
+        )
+
+    except (InvalidOperation, ValueError, TypeError):
+        raise HTTPException(
+            status_code=400,
+            detail="Fecha o monto del ACECF inválido"
+        )
+
+    if not monto_decimal.is_finite() or monto_decimal < 0:
+        raise HTTPException(
+            status_code=400,
+            detail="MontoTotal fuera del rango permitido"
+        )
+
+    try:
+        estado_comercial = int(
+            estado_raw or ""
+        )
+
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail="Estado comercial inválido"
+        )
+
+    if estado_comercial not in (1, 2):
+        raise HTTPException(
+            status_code=400,
+            detail="Estado debe ser 1 o 2"
+        )
+
+    if estado_comercial == 2:
+        if not motivo or len(motivo) > 250:
+            raise HTTPException(
+                status_code=400,
+                detail="El rechazo requiere un motivo de hasta 250 caracteres"
+            )
+
+    empresa_result = await db.execute(
+        select(Company).where(
+            func.regexp_replace(
+                func.coalesce(Company.rnc, ""),
+                "[^0-9]",
+                "",
+                "g"
+            ) == rnc_emisor
+        )
+    )
+
+    empresa = empresa_result.scalars().first()
+
+    if not empresa:
+        raise HTTPException(
+            status_code=400,
+            detail="RNCEmisor no corresponde a una empresa registrada en FactuPlus"
+        )
+
+    empresa_uuid = str(empresa.uuid)
+
+    xml_sha256 = hashlib.sha256(
+        contenido
+    ).hexdigest()
+
+    try:
+        existente_result = await db.execute(
+            select(EcfAprobacionComercial).where(
+                EcfAprobacionComercial.empresa_uuid == empresa_uuid,
+                EcfAprobacionComercial.encf == encf
+            ).with_for_update()
+        )
+
+        existente = existente_result.scalar_one_or_none()
+
+        if existente:
+            if existente.xml_sha256 == xml_sha256:
+                return Response(status_code=200)
+
+            raise HTTPException(
+                status_code=400,
+                detail="Ya existe una aprobación o rechazo diferente para este e-NCF"
+            )
+
+        aprobacion = EcfAprobacionComercial(
+            empresa_uuid=empresa_uuid,
+            rnc_emisor=rnc_emisor,
+            rnc_comprador=rnc_comprador,
+            encf=encf,
+            fecha_emision=fecha_emision,
+            monto_total=monto_total_raw,
+            estado_comercial=estado_comercial,
+            detalle_motivo_rechazo=motivo,
+            fecha_hora_aprobacion=fecha_hora_aprobacion,
+            xml_original=contenido.decode("utf-8-sig"),
+            xml_sha256=xml_sha256,
+            certificado_sn=certificado_sn,
+            xsd_validado=True,
+            firma_validada=True,
+            factura_verificada=None,
+            estado_validacion="pendiente_cruce_factura"
+        )
+
+        db.add(aprobacion)
+
+        await db.commit()
+
+        logger.info(
+            "ACECF recibido empresa=%s encf=%s estado=%s",
+            empresa_uuid,
+            encf,
+            estado_comercial
+        )
+
+        return Response(status_code=200)
+
+    except HTTPException:
+        await db.rollback()
+        raise
+
+    except IntegrityError:
+        await db.rollback()
+
+        existente_result = await db.execute(
+            select(EcfAprobacionComercial).where(
+                EcfAprobacionComercial.empresa_uuid == empresa_uuid,
+                EcfAprobacionComercial.encf == encf
+            )
+        )
+
+        existente = existente_result.scalar_one_or_none()
+
+        if existente and existente.xml_sha256 == xml_sha256:
+            return Response(status_code=200)
+
+        raise HTTPException(
+            status_code=400,
+            detail="Conflicto: ya existe otra aprobación para este e-NCF"
+        )
+
+    except Exception:
+        await db.rollback()
+
+        logger.exception(
+            "Error recibiendo ACECF empresa=%s encf=%s",
+            empresa_uuid,
+            encf
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudo procesar la aprobación comercial"
+        )
+    """  
+    
+""" Manejos de certificados """
+
+_ECF_CERT_MAX_BYTES = 5 * 1024 * 1024
+
+
+@app.post("/ecf/certificados", status_code=201)
+async def subir_certificado_ecf(
+    request: Request,
+    certificado: UploadFile = File(...),
+    cert_password: str = Form(
+        ...,
+        min_length=1,
+        max_length=512
+    ),
+    authorization: str = Header(default=""),
+    db: AsyncSession = Depends(get_db)
+):
+
+    _rate_limit(request, limiter_sensitive)
+
+    partes = authorization.strip().split(" ", 1)
+
+    if (
+        len(partes) != 2
+        or partes[0].lower() != "bearer"
+        or not partes[1].strip()
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Token de autenticación requerido"
+        )
+
+    usuario = await verificar_token(
+        partes[1].strip(),
+        db
+    )
+
+    empresa_uuid = str(
+        usuario.empresa_uuid or ""
+    ).strip()
+
+    if not empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="El usuario no tiene una empresa asignada"
+        )
+
+    
+
+    empresa_result = await db.execute(
+        select(Company).where(
+            Company.uuid == empresa_uuid
+        )
+    )
+
+    empresa = empresa_result.scalar_one_or_none()
+
+    if not empresa:
+        raise HTTPException(
+            status_code=404,
+            detail="No se encontró la empresa"
+        )
+
+    rnc_empresa = re.sub(
+        r"\D",
+        "",
+        str(empresa.rnc or "")
+    )
+
+    if len(rnc_empresa) not in (9, 11):
+        raise HTTPException(
+            status_code=422,
+            detail="La empresa no tiene un RNC o cédula válido registrado"
+        )
+
+    filename = str(
+        certificado.filename or ""
+    ).lower()
+
+    if not filename.endswith((".p12", ".pfx")):
+        raise HTTPException(
+            status_code=415,
+            detail="Solo se permiten certificados PKCS#12 (.p12 o .pfx)"
+        )
+
+    certificado_bytes = await certificado.read(
+        _ECF_CERT_MAX_BYTES + 1
+    )
+
+    await certificado.close()
+
+    if not certificado_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail="El certificado está vacío"
+        )
+
+    if len(certificado_bytes) > _ECF_CERT_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="El certificado supera el tamaño permitido"
+        )
+
+    try:
+
+        private_key, cert, cadena = load_key_and_certificates(
+            certificado_bytes,
+            cert_password.encode("utf-8")
+        )
+
+    except Exception:
+        raise HTTPException(
+            status_code=422,
+            detail="No se pudo abrir el certificado. Verifica el archivo y su contraseña"
+        )
+
+    if not private_key or not cert:
+        raise HTTPException(
+            status_code=422,
+            detail="El PKCS#12 debe contener un certificado y una clave privada"
+        )
+
+    try:
+
+        clave_publica_privada = private_key.public_key().public_bytes(
+            Encoding.DER,
+            PublicFormat.SubjectPublicKeyInfo
+        )
+
+        clave_publica_certificado = cert.public_key().public_bytes(
+            Encoding.DER,
+            PublicFormat.SubjectPublicKeyInfo
+        )
+
+        if clave_publica_privada != clave_publica_certificado:
+            raise HTTPException(
+                status_code=422,
+                detail="La clave privada no corresponde al certificado"
+            )
+
+    except HTTPException:
+        raise
+
+    except Exception:
+        raise HTTPException(
+            status_code=422,
+            detail="No se pudo verificar la correspondencia criptográfica"
+        )
+
+    serial_attributes = cert.subject.get_attributes_for_oid(
+        NameOID.SERIAL_NUMBER
+    )
+
+    if not serial_attributes:
+        raise HTTPException(
+            status_code=422,
+            detail="El certificado no contiene el atributo serialNumber"
+        )
+
+    rnc_certificado = re.sub(
+        r"\D",
+        "",
+        serial_attributes[0].value
+    )
+
+    if rnc_certificado != rnc_empresa:
+        raise HTTPException(
+            status_code=422,
+            detail="El titular del certificado no corresponde al RNC de la empresa"
+        )
+
+    ahora = datetime.now(timezone.utc)
+
+    fecha_inicio = cert.not_valid_before_utc
+    fecha_vencimiento = cert.not_valid_after_utc
+
+    if ahora < fecha_inicio or ahora > fecha_vencimiento:
+        raise HTTPException(
+            status_code=422,
+            detail="El certificado está fuera de su período de validez"
+        )
+
+    fingerprint = cert.fingerprint(
+        hashes.SHA256()
+    ).hex()
+
+    duplicado = await db.execute(
+        text("""
+            SELECT id
+            FROM ecf_certificados
+            WHERE empresa_uuid = :empresa_uuid
+              AND fingerprint_sha256 = :fingerprint
+            LIMIT 1
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "fingerprint": fingerprint
+        }
+    )
+
+    if duplicado.first():
+        raise HTTPException(
+            status_code=409,
+            detail="Este certificado ya está registrado"
+        )
+
+    certificado_id = str(uuid.uuid4())
+
+    try:
+
+        datos_cifrados = _ecf_cifrar_certificado(
+            certificado_bytes=certificado_bytes,
+            cert_password=cert_password,
+            empresa_uuid=empresa_uuid,
+            certificado_id=certificado_id
+        )
+
+    except RuntimeError:
+        logger.exception(
+            "Error de configuración de cifrado ECF"
+        )
+
+        raise HTTPException(
+            status_code=503,
+            detail="El servicio de cifrado no está configurado"
+        )
+
+    try:
+
+        await db.execute(
+            text("""
+                INSERT INTO ecf_certificados (
+                    id,
+                    empresa_uuid,
+                    fingerprint_sha256,
+                    serial_number,
+                    subject_dn,
+                    issuer_dn,
+                    valid_from,
+                    valid_to,
+                    payload_cifrado,
+                    payload_nonce,
+                    dek_cifrada,
+                    dek_nonce,
+                    key_provider,
+                    key_version,
+                    estado,
+                    creado_por
+                )
+                VALUES (
+                    :id,
+                    :empresa_uuid,
+                    :fingerprint,
+                    :serial,
+                    :subject,
+                    :issuer,
+                    :valid_from,
+                    :valid_to,
+                    :payload,
+                    :payload_nonce,
+                    :dek,
+                    :dek_nonce,
+                    :key_provider,
+                    :key_version,
+                    'pendiente_validacion',
+                    :creado_por
+                )
+            """),
+            {
+                "id": certificado_id,
+                "empresa_uuid": empresa_uuid,
+                "fingerprint": fingerprint,
+                "serial": format(cert.serial_number, "x"),
+                "subject": cert.subject.rfc4514_string(),
+                "issuer": cert.issuer.rfc4514_string(),
+                "valid_from": fecha_inicio,
+                "valid_to": fecha_vencimiento,
+                "payload": datos_cifrados["payload_cifrado"],
+                "payload_nonce": datos_cifrados["payload_nonce"],
+                "dek": datos_cifrados["dek_cifrada"],
+                "dek_nonce": datos_cifrados["dek_nonce"],
+                "key_provider": datos_cifrados["key_provider"],
+                "key_version": datos_cifrados["key_version"],
+                "creado_por": str(usuario.id)
+            }
+        )
+
+        await db.commit()
+
+    except IntegrityError:
+
+        await db.rollback()
+
+        raise HTTPException(
+            status_code=409,
+            detail="El certificado ya está registrado o existe un conflicto"
+        )
+
+    except Exception:
+
+        await db.rollback()
+
+        logger.exception(
+            "Error guardando certificado ECF empresa=%s",
+            empresa_uuid
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudo registrar el certificado"
+        )
+
+    return {
+        "ok": True,
+        "mensaje": "Certificado recibido y almacenado cifrado",
+        "certificado": {
+            "id": certificado_id,
+            "fingerprint_sha256": fingerprint,
+            "serial_number": format(cert.serial_number, "x"),
+            "titular": cert.subject.rfc4514_string(),
+            "fecha_vencimiento": fecha_vencimiento.isoformat(),
+            "estado": "pendiente_validacion"
+        }
+    }
+                
 """ WEBSCOKER """
 clientes_ws = {}
 
