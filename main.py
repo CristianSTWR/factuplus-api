@@ -92,7 +92,7 @@ import re
 # APLICACION
 from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, Producto, UnidadMedida, Rol, RolPermiso, UsuarioRol, MetodoPago, Cliente, Suplidor
 from models import Compra, CompraDetalle, VentaDetalle, Pago, HistorialStock, Devolucion, DevolucionDetalle, Cotizacion, CotizacionDetalle, Descuento, DescuentoCliente, DescuentoCondicion, DescuentoDia, DescuentoProducto
-from models import SecuenciaECF, EcfFirmadorTicket, EcfRecepcionIntento, EcfAcuse, EcfRecibido
+from models import SecuenciaECF, EcfFirmadorTicket, EcfRecepcionIntento, EcfAcuse, EcfRecibido, EcfCertificado
 
 # WEB
 from models import ListaEspera, EmpresaDispositivo
@@ -501,9 +501,7 @@ def _ecf_cifrar_certificado(
     empresa_uuid: str,
     certificado_id: str
 ):
-
     clave_maestra = _ecf_obtener_clave_maestra()
-
     clave_datos = secrets.token_bytes(32)
 
     aad = (
@@ -524,33 +522,29 @@ def _ecf_cifrar_certificado(
 
     payload_nonce = secrets.token_bytes(12)
 
-    payload_cifrado = AESGCM(
-        clave_datos
-    ).encrypt(
+    payload_cifrado = AESGCM(clave_datos).encrypt(
         payload_nonce,
         paquete,
         aad
     )
 
-    dek_nonce = secrets.token_bytes(12)
+    clave_nonce = secrets.token_bytes(12)
 
-    dek_cifrada = AESGCM(
-        clave_maestra
-    ).encrypt(
-        dek_nonce,
+    clave_cifrada = AESGCM(clave_maestra).encrypt(
+        clave_nonce,
         clave_datos,
         aad
     )
 
     return {
         "payload_cifrado": payload_cifrado,
-        "payload_nonce": payload_nonce,
-        "dek_cifrada": dek_cifrada,
-        "dek_nonce": dek_nonce,
-        "key_provider": "local-env-envelope-v1",
-        "key_version": 1
+        "clave_cifrada": clave_cifrada,
+        "nonce": payload_nonce + clave_nonce,
+        "proveedor_claves": "local-env-envelope-v1",
+        "referencia_clave": "env:ECF_CERT_MASTER_KEY",
+        "version_cifrado": 1
     }
-
+    
 # Get planes
 @app.get("/plans/{plan_key}")
 async def get_plan(
@@ -18275,7 +18269,6 @@ async def subir_certificado_ecf(
     authorization: str = Header(default=""),
     db: AsyncSession = Depends(get_db)
 ):
-
     _rate_limit(request, limiter_sensitive)
 
     partes = authorization.strip().split(" ", 1)
@@ -18290,14 +18283,9 @@ async def subir_certificado_ecf(
             detail="Token de autenticación requerido"
         )
 
-    usuario = await verificar_token(
-        partes[1].strip(),
-        db
-    )
+    usuario = await verificar_token(partes[1].strip(), db)
 
-    empresa_uuid = str(
-        usuario.empresa_uuid or ""
-    ).strip()
+    empresa_uuid = str(usuario.empresa_uuid or "").strip()
 
     if not empresa_uuid:
         raise HTTPException(
@@ -18305,7 +18293,19 @@ async def subir_certificado_ecf(
             detail="El usuario no tiene una empresa asignada"
         )
 
-    
+    try:
+        empresa_uuid_db = uuid.UUID(empresa_uuid)
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail="El identificador de empresa no es válido"
+        )
+
+    if not usuario.id:
+        raise HTTPException(
+            status_code=401,
+            detail="No se pudo identificar al usuario"
+        )
 
     empresa_result = await db.execute(
         select(Company).where(
@@ -18333,9 +18333,7 @@ async def subir_certificado_ecf(
             detail="La empresa no tiene un RNC o cédula válido registrado"
         )
 
-    filename = str(
-        certificado.filename or ""
-    ).lower()
+    filename = str(certificado.filename or "").lower()
 
     if not filename.endswith((".p12", ".pfx")):
         raise HTTPException(
@@ -18362,7 +18360,6 @@ async def subir_certificado_ecf(
         )
 
     try:
-
         private_key, cert, cadena = load_key_and_certificates(
             certificado_bytes,
             cert_password.encode("utf-8")
@@ -18381,7 +18378,6 @@ async def subir_certificado_ecf(
         )
 
     try:
-
         clave_publica_privada = private_key.public_key().public_bytes(
             Encoding.DER,
             PublicFormat.SubjectPublicKeyInfo
@@ -18444,40 +18440,75 @@ async def subir_certificado_ecf(
         hashes.SHA256()
     ).hex()
 
-    duplicado = await db.execute(
-        text("""
-            SELECT id
-            FROM ecf_certificados
-            WHERE empresa_uuid = :empresa_uuid
-              AND fingerprint_sha256 = :fingerprint
-            LIMIT 1
-        """),
-        {
-            "empresa_uuid": empresa_uuid,
-            "fingerprint": fingerprint
-        }
-    )
-
-    if duplicado.first():
-        raise HTTPException(
-            status_code=409,
-            detail="Este certificado ya está registrado"
-        )
-
-    certificado_id = str(uuid.uuid4())
+    certificado_uuid = uuid.uuid4()
+    certificado_id = str(certificado_uuid)
 
     try:
+        duplicado = await db.scalar(
+            select(EcfCertificado.id).where(
+                EcfCertificado.empresa_uuid == empresa_uuid_db,
+                EcfCertificado.fingerprint_sha256 == fingerprint
+            ).limit(1)
+        )
+
+        if duplicado:
+            raise HTTPException(
+                status_code=409,
+                detail="Este certificado ya está registrado"
+            )
 
         datos_cifrados = _ecf_cifrar_certificado(
             certificado_bytes=certificado_bytes,
             cert_password=cert_password,
-            empresa_uuid=empresa_uuid,
+            empresa_uuid=str(empresa_uuid_db),
             certificado_id=certificado_id
         )
 
-    except RuntimeError:
+        registro = EcfCertificado(
+            id=certificado_uuid,
+            empresa_uuid=empresa_uuid_db,
+            fingerprint_sha256=fingerprint,
+            serial_number=format(cert.serial_number, "x"),
+            subject_dn=cert.subject.rfc4514_string(),
+            issuer_dn=cert.issuer.rfc4514_string(),
+            valid_from=fecha_inicio,
+            valid_to=fecha_vencimiento,
+            payload_cifrado=datos_cifrados["payload_cifrado"],
+            clave_cifrada=datos_cifrados["clave_cifrada"],
+            nonce=datos_cifrados["nonce"],
+            proveedor_claves=datos_cifrados["proveedor_claves"],
+            referencia_clave=datos_cifrados["referencia_clave"],
+            version_cifrado=datos_cifrados["version_cifrado"],
+            estado="pendiente_validacion",
+            creado_por=usuario.id
+        )
+
+        db.add(registro)
+
+        await db.commit()
+
+    except HTTPException:
+        await db.rollback()
+        raise
+
+    except IntegrityError:
+        await db.rollback()
+
         logger.exception(
-            "Error de configuración de cifrado ECF"
+            "[ECF CERTIFICADOS] Conflicto de integridad empresa=%s",
+            empresa_uuid
+        )
+
+        raise HTTPException(
+            status_code=409,
+            detail="El certificado ya está registrado o existe un conflicto"
+        )
+
+    except RuntimeError:
+        await db.rollback()
+
+        logger.exception(
+            "[ECF CERTIFICADOS] Error de configuración de cifrado"
         )
 
         raise HTTPException(
@@ -18485,83 +18516,11 @@ async def subir_certificado_ecf(
             detail="El servicio de cifrado no está configurado"
         )
 
-    try:
-
-        await db.execute(
-            text("""
-                INSERT INTO ecf_certificados (
-                    id,
-                    empresa_uuid,
-                    fingerprint_sha256,
-                    serial_number,
-                    subject_dn,
-                    issuer_dn,
-                    valid_from,
-                    valid_to,
-                    payload_cifrado,
-                    payload_nonce,
-                    dek_cifrada,
-                    dek_nonce,
-                    key_provider,
-                    key_version,
-                    estado,
-                    creado_por
-                )
-                VALUES (
-                    :id,
-                    :empresa_uuid,
-                    :fingerprint,
-                    :serial,
-                    :subject,
-                    :issuer,
-                    :valid_from,
-                    :valid_to,
-                    :payload,
-                    :payload_nonce,
-                    :dek,
-                    :dek_nonce,
-                    :key_provider,
-                    :key_version,
-                    'pendiente_validacion',
-                    :creado_por
-                )
-            """),
-            {
-                "id": certificado_id,
-                "empresa_uuid": empresa_uuid,
-                "fingerprint": fingerprint,
-                "serial": format(cert.serial_number, "x"),
-                "subject": cert.subject.rfc4514_string(),
-                "issuer": cert.issuer.rfc4514_string(),
-                "valid_from": fecha_inicio,
-                "valid_to": fecha_vencimiento,
-                "payload": datos_cifrados["payload_cifrado"],
-                "payload_nonce": datos_cifrados["payload_nonce"],
-                "dek": datos_cifrados["dek_cifrada"],
-                "dek_nonce": datos_cifrados["dek_nonce"],
-                "key_provider": datos_cifrados["key_provider"],
-                "key_version": datos_cifrados["key_version"],
-                "creado_por": str(usuario.id)
-            }
-        )
-
-        await db.commit()
-
-    except IntegrityError:
-
-        await db.rollback()
-
-        raise HTTPException(
-            status_code=409,
-            detail="El certificado ya está registrado o existe un conflicto"
-        )
-
     except Exception:
-
         await db.rollback()
 
         logger.exception(
-            "Error guardando certificado ECF empresa=%s",
+            "[ECF CERTIFICADOS] Error guardando certificado empresa=%s",
             empresa_uuid
         )
 
@@ -18573,6 +18532,9 @@ async def subir_certificado_ecf(
     return {
         "ok": True,
         "mensaje": "Certificado recibido y almacenado cifrado",
+        "id": certificado_id,
+        "fingerprint_sha256": fingerprint,
+        "estado": "pendiente_validacion",
         "certificado": {
             "id": certificado_id,
             "fingerprint_sha256": fingerprint,
@@ -18582,7 +18544,7 @@ async def subir_certificado_ecf(
             "estado": "pendiente_validacion"
         }
     }
-                
+                  
 """ WEBSCOKER """
 clientes_ws = {}
 

@@ -5,7 +5,7 @@ from decimal import Decimal
 from sqlalchemy import (
     Boolean, DateTime, Integer, String, Numeric, Enum, SmallInteger, Date,
     ForeignKey, UniqueConstraint, func, text, BigInteger, Text, CheckConstraint,
-    Index, CHAR
+    Index, CHAR, LargeBinary
 )
 
 import enum
@@ -4113,6 +4113,140 @@ class EcfRecepcionIntento(Base):
     )
 
 
+class EcfCertificado(Base):
+    __tablename__ = "ecf_certificados"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "empresa_uuid",
+            "fingerprint_sha256",
+            name="uq_ecf_certificado_empresa_fingerprint"
+        ),
+        CheckConstraint(
+            """
+            estado IN (
+                'pendiente_validacion',
+                'activo',
+                'reemplazado',
+                'revocado',
+                'expirado'
+            )
+            """,
+            name="ecf_certificados_estado_check"
+        ),
+        Index(
+            "ecf_certificado_unico_activo_empresa",
+            "empresa_uuid",
+            unique=True,
+            postgresql_where=text("estado = 'activo'")
+        ),
+        Index(
+            "ecf_certificados_empresa_idx",
+            "empresa_uuid"
+        )
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4
+    )
+
+    empresa_uuid: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=False
+    )
+
+    fingerprint_sha256: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False
+    )
+
+    serial_number: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    subject_dn: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    issuer_dn: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    valid_from: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    valid_to: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    payload_cifrado: Mapped[bytes] = mapped_column(
+        LargeBinary,
+        nullable=False
+    )
+
+    clave_cifrada: Mapped[bytes] = mapped_column(
+        LargeBinary,
+        nullable=False
+    )
+
+    nonce: Mapped[bytes] = mapped_column(
+        LargeBinary,
+        nullable=False
+    )
+
+    proveedor_claves: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False
+    )
+
+    referencia_clave: Mapped[str] = mapped_column(
+        Text,
+        nullable=False
+    )
+
+    version_cifrado: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1")
+    )
+
+    estado: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="pendiente_validacion",
+        server_default=text("'pendiente_validacion'")
+    )
+
+    creado_por: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=False
+    )
+
+    creado_en: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now()
+    )
+
+    revocado_por: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=True
+    )
+
+    revocado_en: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+    
 """ WEB PAGINA """
 
 class EmpresaDispositivo(Base):
