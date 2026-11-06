@@ -16949,9 +16949,18 @@ import re as _ecf_re
 import xml.etree.ElementTree as _ecf_et
 
 _ECF_TIPOS_PERMITIDOS = {
-    "E31", "E32", "E33", "E34", "E41",
-    "E43", "E44", "E45", "E46", "E47"
+    "E31",
+    "E32",
+    "E33",
+    "E34",
+    "E41",
+    "E43",
+    "E44",
+    "E45",
+    "E46",
+    "E47"
 }
+
 _ECF_MAX_XML_BYTES = 10 * 1024 * 1024
 _ECF_SIGNER_TIMEOUT = max(
     5,
@@ -17403,9 +17412,15 @@ async def recibir_ecf_factuplus(
         _ecf_xml_text(root, "eNCF") or ""
     ).strip().upper()
 
-    tipo_ecf = str(
-        _ecf_xml_text(root, "TipoeCF") or encf[:3]
+    tipo_xml = str(
+        _ecf_xml_text(root, "TipoeCF") or ""
     ).strip().upper()
+
+    tipo_ecf = (
+        f"E{tipo_xml}"
+        if tipo_xml.isdigit()
+        else tipo_xml or encf[:3]
+    )
 
     if len(rnc_emisor) not in (9, 11):
         raise HTTPException(
