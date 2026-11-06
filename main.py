@@ -18733,6 +18733,24 @@ async def validar_certificado_ecf(
             raise ValueError(
                 "El certificado no contiene serialNumber del titular"
             )
+            
+                # Reemplazar cualquier certificado activo anterior de esta empresa
+        await db.execute(
+            update(EcfCertificado)
+            .where(
+                EcfCertificado.empresa_uuid == empresa_uuid,
+                EcfCertificado.estado == "activo",
+                EcfCertificado.id != registro.id
+            )
+            .values(estado="reemplazado")
+        )
+
+        await db.flush()
+
+        # Activar el certificado recién validado
+        registro.estado = "activo"
+
+        await db.commit()
 
         return {
             "ok": True,
