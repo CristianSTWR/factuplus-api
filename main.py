@@ -544,7 +544,56 @@ def _ecf_cifrar_certificado(
         "referencia_clave": "env:ECF_CERT_MASTER_KEY",
         "version_cifrado": 1
     }
-    
+
+def _ecf_descifrar_certificado(registro):
+    if registro.proveedor_claves != "local-env-envelope-v1":
+        raise RuntimeError("Proveedor de claves no soportado")
+
+    if registro.version_cifrado != 1:
+        raise RuntimeError("Versión de cifrado no soportada")
+
+    nonce = bytes(registro.nonce or b"")
+
+    if len(nonce) != 24:
+        raise RuntimeError("El nonce almacenado no tiene una longitud válida")
+
+    payload_nonce = nonce[:12]
+    clave_nonce = nonce[12:24]
+
+    clave_maestra = _ecf_obtener_clave_maestra()
+
+    aad = (
+        f"factuplus:ecf-cert:v1:"
+        f"{registro.empresa_uuid}:{registro.id}"
+    ).encode("utf-8")
+
+    clave_datos = AESGCM(clave_maestra).decrypt(
+        clave_nonce,
+        bytes(registro.clave_cifrada),
+        aad
+    )
+
+    paquete_cifrado = AESGCM(clave_datos).decrypt(
+        payload_nonce,
+        bytes(registro.payload_cifrado),
+        aad
+    )
+
+    paquete = json.loads(
+        paquete_cifrado.decode("utf-8")
+    )
+
+    certificado_bytes = base64.b64decode(
+        paquete["pkcs12_b64"],
+        validate=True
+    )
+
+    cert_password = paquete["password"]
+
+    if not certificado_bytes or not cert_password:
+        raise RuntimeError("El contenido del certificado está incompleto")
+
+    return certificado_bytes, cert_password    
 # Get planes
 @app.get("/plans/{plan_key}")
 async def get_plan(
@@ -18544,7 +18593,201 @@ async def subir_certificado_ecf(
             "estado": "pendiente_validacion"
         }
     }
-                  
+
+@app.post("/ecf/certificados/{certificado_id}/validar")
+async def validar_certificado_ecf(
+    certificado_id: str,
+    request: Request,
+    authorization: str = Header(default=""),
+    db: AsyncSession = Depends(get_db)
+):
+    _rate_limit(request, limiter_sensitive)
+
+    partes = authorization.strip().split(" ", 1)
+
+    if (
+        len(partes) != 2
+        or partes[0].lower() != "bearer"
+        or not partes[1].strip()
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Token de autenticación requerido"
+        )
+
+    usuario = await verificar_token(
+        partes[1].strip(),
+        db
+    )
+
+    try:
+        certificado_uuid = uuid.UUID(certificado_id)
+        empresa_uuid = uuid.UUID(str(usuario.empresa_uuid))
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(
+            status_code=400,
+            detail="Identificadores no válidos"
+        )
+
+    registro = await db.scalar(
+        select(EcfCertificado).where(
+            EcfCertificado.id == certificado_uuid
+        )
+    )
+
+    if not registro or registro.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=404,
+            detail="No se encontró el certificado de esta empresa"
+        )
+
+    if registro.estado != "pendiente_validacion":
+        raise HTTPException(
+            status_code=409,
+            detail=f"El certificado tiene el estado: {registro.estado}"
+        )
+
+    try:
+        certificado_bytes, cert_password = (
+            _ecf_descifrar_certificado(registro)
+        )
+
+        private_key, cert, cadena = load_key_and_certificates(
+            certificado_bytes,
+            cert_password.encode("utf-8")
+        )
+
+        if not private_key or not cert:
+            raise ValueError(
+                "El PKCS#12 no contiene certificado y clave privada"
+            )
+
+        clave_publica_privada = (
+            private_key.public_key().public_bytes(
+                Encoding.DER,
+                PublicFormat.SubjectPublicKeyInfo
+            )
+        )
+
+        clave_publica_certificado = (
+            cert.public_key().public_bytes(
+                Encoding.DER,
+                PublicFormat.SubjectPublicKeyInfo
+            )
+        )
+
+        if clave_publica_privada != clave_publica_certificado:
+            raise ValueError(
+                "La clave privada no corresponde al certificado"
+            )
+
+        fingerprint = cert.fingerprint(
+            hashes.SHA256()
+        ).hex()
+
+        if fingerprint.lower() != registro.fingerprint_sha256.lower():
+            raise ValueError(
+                "La huella digital no coincide con el registro"
+            )
+
+        serial = format(cert.serial_number, "x")
+
+        if serial.lower() != registro.serial_number.lower():
+            raise ValueError(
+                "El número de serie no coincide con el registro"
+            )
+
+        subject = cert.subject.rfc4514_string()
+        issuer = cert.issuer.rfc4514_string()
+
+        if subject != registro.subject_dn:
+            raise ValueError(
+                "El titular del certificado no coincide con el registro"
+            )
+
+        if issuer != registro.issuer_dn:
+            raise ValueError(
+                "El emisor del certificado no coincide con el registro"
+            )
+
+        ahora = datetime.now(timezone.utc)
+
+        fecha_inicio = cert.not_valid_before_utc
+        fecha_vencimiento = cert.not_valid_after_utc
+
+        if ahora < fecha_inicio:
+            raise ValueError(
+                "El certificado todavía no está vigente"
+            )
+
+        if ahora > fecha_vencimiento:
+            raise ValueError(
+                "El certificado está vencido"
+            )
+
+        serial_attributes = cert.subject.get_attributes_for_oid(
+            NameOID.SERIAL_NUMBER
+        )
+
+        if not serial_attributes:
+            raise ValueError(
+                "El certificado no contiene serialNumber del titular"
+            )
+
+        return {
+            "ok": True,
+            "mensaje": "Validación criptográfica superada",
+            "certificado": {
+                "id": str(registro.id),
+                "fingerprint_sha256": fingerprint,
+                "serial_number": serial,
+                "titular": subject,
+                "emisor": issuer,
+                "fecha_inicio": fecha_inicio.isoformat(),
+                "fecha_vencimiento": fecha_vencimiento.isoformat()
+            },
+            "comprobaciones": {
+                "descifrado": True,
+                "pkcs12": True,
+                "clave_privada_coincide": True,
+                "huella_digital_coincide": True,
+                "numero_serie_coincide": True,
+                "titular_coincide": True,
+                "emisor_coincide": True,
+                "vigencia": True,
+                "cadena_certificacion": "pendiente",
+                "revocacion": "pendiente",
+                "autenticacion_dgii": "pendiente"
+            },
+            "estado": "pendiente_validacion"
+        }
+
+    except HTTPException:
+        raise
+
+    except RuntimeError:
+        logger.exception(
+            "[ECF VALIDACION] Error de configuración certificado=%s",
+            certificado_id
+        )
+
+        raise HTTPException(
+            status_code=503,
+            detail="No está disponible la configuración de cifrado"
+        )
+
+    except Exception:
+        logger.exception(
+            "[ECF VALIDACION] Falló validación certificado=%s empresa=%s",
+            certificado_id,
+            empresa_uuid
+        )
+
+        raise HTTPException(
+            status_code=422,
+            detail="No se pudo validar criptográficamente el certificado almacenado"
+        )
+                          
 """ WEBSCOKER """
 clientes_ws = {}
 
