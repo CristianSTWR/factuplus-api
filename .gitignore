@@ -5,3 +5,4 @@ __pycache__/
 *.zip
 basesdedatos.html
 Descargar-XSD-DGII-Corregido.ps1
+simulador_dgii.py

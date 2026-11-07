@@ -19858,7 +19858,7 @@ async def recibir_ecf_factuplus(
                     rnc_comprador=rnc_comprador,
                     encf=encf,
                     estado=estado_arecf,
-                    motivo=motivo_arecf
+                    codigo_motivo=motivo_arecf
                 )
             )
 
