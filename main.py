@@ -2194,7 +2194,7 @@ async def sync_batch(
             payload = item.get("payload")
 
             if item_type == "create_company":
-                
+
                 uuid = payload["uuid"]
 
                 q = await db.execute(
@@ -2215,7 +2215,23 @@ async def sync_batch(
                     )
 
                     db.add(company)
-                
+
+                    await db.flush()
+
+                await db.execute(
+                    text("""
+                        INSERT INTO empresa_sync_counters (
+                            empresa_uuid
+                        )
+                        VALUES (
+                            :empresa_uuid
+                        )
+                        ON CONFLICT (empresa_uuid) DO NOTHING
+                    """),
+                    {
+                        "empresa_uuid": uuid
+                    }
+                )  
                     
             elif item_type == "actualizar_empresa":
 
