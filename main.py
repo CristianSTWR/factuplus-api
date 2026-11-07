@@ -19154,33 +19154,56 @@ async def _ecf_firmar_arecf_servidor(
 
     import uuid
 
+    from pathlib import Path
     from datetime import datetime, timezone
     from zoneinfo import ZoneInfo
 
     from cryptography.hazmat.primitives import hashes
+
     from cryptography.hazmat.primitives.serialization import (
         Encoding,
         PrivateFormat,
         NoEncryption,
         PublicFormat
     )
+
     from cryptography.hazmat.primitives.serialization.pkcs12 import (
         load_key_and_certificates
     )
+
     from cryptography.hazmat.primitives.asymmetric import rsa
 
-    if estado not in (0, 1):
-        raise ValueError("El estado del ARECF debe ser 0 o 1")
+    # --------------------------------------------------
+    # VALIDACIONES INICIALES
+    # --------------------------------------------------
 
-    if estado == 1 and codigo_motivo is None:
+    if estado not in (0, 1):
         raise ValueError(
-            "Debe indicar el código de motivo cuando el ARECF es rechazado"
+            "El estado del ARECF debe ser 0 o 1"
         )
 
+    if estado == 1:
+        if codigo_motivo not in (1, 2, 3, 4):
+            raise ValueError(
+                "El código de motivo debe ser 1, 2, 3 o 4"
+            )
+
+    if estado == 0:
+        codigo_motivo = None
+
     try:
-        empresa_id = uuid.UUID(str(empresa_uuid))
+        empresa_id = uuid.UUID(
+            str(empresa_uuid)
+        )
+
     except (ValueError, TypeError):
-        raise ValueError("El UUID de la empresa no es válido")
+        raise ValueError(
+            "El UUID de la empresa no es válido"
+        )
+
+    # --------------------------------------------------
+    # OBTENER CERTIFICADO ACTIVO
+    # --------------------------------------------------
 
     registro = await db.scalar(
         select(EcfCertificado)
@@ -19188,7 +19211,9 @@ async def _ecf_firmar_arecf_servidor(
             EcfCertificado.empresa_uuid == empresa_id,
             EcfCertificado.estado == "activo"
         )
-        .order_by(EcfCertificado.creado_en.desc())
+        .order_by(
+            EcfCertificado.creado_en.desc()
+        )
         .limit(1)
     )
 
@@ -19197,13 +19222,19 @@ async def _ecf_firmar_arecf_servidor(
             "La empresa no tiene un certificado electrónico activo"
         )
 
+    # --------------------------------------------------
+    # DESCIFRAR PKCS12
+    # --------------------------------------------------
+
     certificado_bytes, cert_password = (
         _ecf_descifrar_certificado(registro)
     )
 
-    private_key, cert, cadena = load_key_and_certificates(
-        certificado_bytes,
-        cert_password.encode("utf-8")
+    private_key, cert, cadena = (
+        load_key_and_certificates(
+            certificado_bytes,
+            cert_password.encode("utf-8")
+        )
     )
 
     if not private_key or not cert:
@@ -19211,10 +19242,17 @@ async def _ecf_firmar_arecf_servidor(
             "El PKCS#12 no contiene certificado y clave privada"
         )
 
-    if not isinstance(private_key, rsa.RSAPrivateKey):
+    if not isinstance(
+        private_key,
+        rsa.RSAPrivateKey
+    ):
         raise RuntimeError(
             "El certificado debe utilizar una clave RSA"
         )
+
+    # --------------------------------------------------
+    # VERIFICAR VIGENCIA
+    # --------------------------------------------------
 
     ahora = datetime.now(timezone.utc)
 
@@ -19226,14 +19264,22 @@ async def _ecf_firmar_arecf_servidor(
             "El certificado no está vigente"
         )
 
-    clave_publica_privada = private_key.public_key().public_bytes(
-        Encoding.DER,
-        PublicFormat.SubjectPublicKeyInfo
+    # --------------------------------------------------
+    # VERIFICAR CLAVE PRIVADA
+    # --------------------------------------------------
+
+    clave_publica_privada = (
+        private_key.public_key().public_bytes(
+            Encoding.DER,
+            PublicFormat.SubjectPublicKeyInfo
+        )
     )
 
-    clave_publica_certificado = cert.public_key().public_bytes(
-        Encoding.DER,
-        PublicFormat.SubjectPublicKeyInfo
+    clave_publica_certificado = (
+        cert.public_key().public_bytes(
+            Encoding.DER,
+            PublicFormat.SubjectPublicKeyInfo
+        )
     )
 
     if clave_publica_privada != clave_publica_certificado:
@@ -19241,19 +19287,36 @@ async def _ecf_firmar_arecf_servidor(
             "La clave privada no corresponde al certificado"
         )
 
-    fingerprint = cert.fingerprint(hashes.SHA256()).hex()
+    # --------------------------------------------------
+    # VERIFICAR HUELLA DIGITAL
+    # --------------------------------------------------
+
+    fingerprint = cert.fingerprint(
+        hashes.SHA256()
+    ).hex()
 
     if fingerprint.lower() != registro.fingerprint_sha256.lower():
         raise RuntimeError(
             "La huella digital del certificado no coincide"
         )
 
-    serial = format(cert.serial_number, "x")
+    # --------------------------------------------------
+    # VERIFICAR NÚMERO DE SERIE
+    # --------------------------------------------------
+
+    serial = format(
+        cert.serial_number,
+        "x"
+    )
 
     if serial.lower() != registro.serial_number.lower():
         raise RuntimeError(
             "El número de serie del certificado no coincide"
         )
+
+    # --------------------------------------------------
+    # VERIFICAR TITULAR Y EMISOR
+    # --------------------------------------------------
 
     if cert.subject.rfc4514_string() != registro.subject_dn:
         raise RuntimeError(
@@ -19265,54 +19328,77 @@ async def _ecf_firmar_arecf_servidor(
             "El emisor del certificado no coincide con el registro"
         )
 
-    zona_dgii = ZoneInfo("America/Santo_Domingo")
+    # --------------------------------------------------
+    # FECHA Y HORA DEL ACUSE
+    # --------------------------------------------------
+
+    zona_dgii = ZoneInfo(
+        "America/Santo_Domingo"
+    )
 
     fecha_acuse = datetime.now(
         zona_dgii
-    ).strftime("%d-%m-%Y %H:%M:%S")
+    ).strftime(
+        "%d-%m-%Y %H:%M:%S"
+    )
 
-    root = _ecf_lxml.Element("arecf")
+    # --------------------------------------------------
+    # CONSTRUIR XML ARECF
+    # --------------------------------------------------
+
+    root = _ecf_lxml.Element(
+        "ARECF",
+        nsmap={
+            "xsi": "http://www.w3.org/2001/XMLSchema-instance",
+            "xsd": "http://www.w3.org/2001/XMLSchema"
+        }
+    )
 
     detalle = _ecf_lxml.SubElement(
         root,
-        "detalleacusederecibo"
+        "DetalleAcusedeRecibo"
     )
 
     _ecf_lxml.SubElement(
         detalle,
-        "version"
+        "Version"
     ).text = "1.0"
 
     _ecf_lxml.SubElement(
         detalle,
-        "rncemisor"
+        "RNCEmisor"
     ).text = str(rnc_emisor).strip()
 
     _ecf_lxml.SubElement(
         detalle,
-        "rnccomprador"
+        "RNCComprador"
     ).text = str(rnc_comprador).strip()
 
     _ecf_lxml.SubElement(
         detalle,
-        "encf"
+        "eNCF"
     ).text = str(encf).strip()
 
     _ecf_lxml.SubElement(
         detalle,
-        "estado"
+        "Estado"
     ).text = str(estado)
 
     if estado == 1:
+
         _ecf_lxml.SubElement(
             detalle,
-            "codigomotivonorecibido"
+            "CodigoMotivoNoRecibido"
         ).text = str(codigo_motivo)
 
     _ecf_lxml.SubElement(
         detalle,
-        "fechahoraacuserecibo"
+        "FechaHoraAcuseRecibo"
     ).text = fecha_acuse
+
+    # --------------------------------------------------
+    # CREAR PLANTILLA XMLDSIG
+    # --------------------------------------------------
 
     signature = _ecf_xmlsec.template.create(
         root,
@@ -19334,6 +19420,10 @@ async def _ecf_firmar_arecf_servidor(
         _ecf_xmlsec.Transform.ENVELOPED
     )
 
+    # --------------------------------------------------
+    # AGREGAR CERTIFICADO X509
+    # --------------------------------------------------
+
     key_info = _ecf_xmlsec.template.ensure_key_info(
         signature
     )
@@ -19345,6 +19435,10 @@ async def _ecf_firmar_arecf_servidor(
     _ecf_xmlsec.template.x509_data_add_certificate(
         x509_data
     )
+
+    # --------------------------------------------------
+    # PREPARAR CLAVE PRIVADA
+    # --------------------------------------------------
 
     private_key_pem = private_key.private_bytes(
         Encoding.PEM,
@@ -19367,16 +19461,31 @@ async def _ecf_firmar_arecf_servidor(
         _ecf_xmlsec.KeyFormat.CERT_PEM
     )
 
+    # --------------------------------------------------
+    # FIRMAR XML
+    # --------------------------------------------------
+
     signing_context = _ecf_xmlsec.SignatureContext()
+
     signing_context.key = signing_key
-    signing_context.sign(signature)
+
+    signing_context.sign(
+        signature
+    )
+
+    # --------------------------------------------------
+    # SERIALIZAR XML FIRMADO
+    # --------------------------------------------------
 
     contenido_firmado = _ecf_lxml.tostring(
         root,
         encoding="UTF-8",
-        xml_declaration=True,
-        standalone=True
+        xml_declaration=True
     )
+
+    # --------------------------------------------------
+    # VALIDAR XSD OFICIAL ARECF
+    # --------------------------------------------------
 
     ruta_xsd = (
         Path(__file__).resolve().parent
@@ -19394,6 +19503,7 @@ async def _ecf_firmar_arecf_servidor(
     parser = _ecf_parser_seguro()
 
     try:
+
         documento_xsd = _ecf_lxml.parse(
             str(ruta_xsd),
             parser
@@ -19408,24 +19518,45 @@ async def _ecf_firmar_arecf_servidor(
             parser
         )
 
-        esquema.assertValid(documento)
+        esquema.assertValid(
+            documento
+        )
 
     except _ecf_lxml.DocumentInvalid as exc:
+
         error = esquema.error_log.last_error
 
         raise RuntimeError(
             "El ARECF generado no cumple el XSD: "
-            + (str(error) if error else str(exc))
+            + (
+                str(error)
+                if error
+                else str(exc)
+            )
         ) from exc
 
     except _ecf_lxml.XMLSyntaxError as exc:
+
         raise RuntimeError(
             "No se pudo interpretar el ARECF generado"
         ) from exc
 
+    except _ecf_lxml.XMLSchemaParseError as exc:
+
+        raise RuntimeError(
+            "El XSD ARECF no pudo compilarse: "
+            + str(exc)
+        ) from exc
+
+    # --------------------------------------------------
+    # VERIFICAR FIRMA GENERADA
+    # --------------------------------------------------
+
     firma_generada = documento.xpath(
         "./ds:Signature",
-        namespaces={"ds": _ECF_XMLDSIG_NS}
+        namespaces={
+            "ds": _ECF_XMLDSIG_NS
+        }
     )
 
     if len(firma_generada) != 1:
@@ -19440,8 +19571,28 @@ async def _ecf_firmar_arecf_servidor(
     )
 
     verify_context = _ecf_xmlsec.SignatureContext()
+
+    verify_context.enabled_reference_uris = (
+        _ecf_xmlsec.constants.TransformUriTypeEmpty
+    )
+
     verify_context.key = verify_key
-    verify_context.verify(firma_generada[0])
+
+    try:
+
+        verify_context.verify(
+            firma_generada[0]
+        )
+
+    except Exception as exc:
+
+        raise RuntimeError(
+            "La firma digital del ARECF no pudo verificarse"
+        ) from exc
+
+    # --------------------------------------------------
+    # RESULTADO
+    # --------------------------------------------------
 
     return contenido_firmado
 
