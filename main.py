@@ -12,6 +12,27 @@ import jwt
 from jose import jwt, JWTError
 import smtplib
 from email.message import EmailMessage
+from lxml import etree as _ecf_lxml
+import xmlsec as _ecf_xmlsec
+
+from cryptography import x509 as _ecf_x509
+from cryptography.hazmat.primitives.asymmetric import rsa as _ecf_rsa
+
+from pathlib import Path
+
+from lxml import etree as _ecf_lxml
+import xmlsec as _ecf_xmlsec
+
+from OpenSSL import crypto as _ecf_crypto
+
+from cryptography import x509 as _ecf_x509
+
+from cryptography.hazmat.primitives import hashes as _ecf_hashes
+
+from cryptography.hazmat.primitives.asymmetric import rsa as _ecf_rsa
+
+from cryptography.hazmat.primitives.serialization import Encoding as _ecf_encoding
+
 from dotenv import load_dotenv
 from dateutil.relativedelta import relativedelta
 from sqlalchemy.dialects.postgresql import insert
@@ -17190,122 +17211,836 @@ def _ecf_xml_arecf_firmado_valido_en_estructura(xml_texto: str, datos: dict) -> 
     return int(valores["estado"]), codigo
 
 
-async def _ecf_enviar_a_firmador_local(empresa_uuid: str, solicitud: dict) -> dict:
-    conexiones = list(_ecf_firmadores.get(empresa_uuid, {}).items())
-    if not conexiones:
-        raise _ECFFirmadorNoDisponible("No hay una computadora firmadora conectada")
+_ECF_XMLDSIG_NS = "http://www.w3.org/2000/09/xmldsig#"
 
-    ultimo_error = None
-    for dispositivo_uuid, websocket in conexiones:
-        if websocket.client_state.name != "CONNECTED":
-            continue
+_ECF_ALGORITMOS_XMLDSIG = {
+    "canonicalization": (
+        "http://www.w3.org/TR/2001/REC-xml-c14n-20010315"
+    ),
+    "signature": (
+        "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
+    ),
+    "digest": (
+        "http://www.w3.org/2001/04/xmlenc#sha256"
+    ),
+    "enveloped": (
+        "http://www.w3.org/2000/09/xmldsig#enveloped-signature"
+    )
+}
 
-        request_id = str(uuid.uuid4())
-        futuro = _ecf_asyncio.get_running_loop().create_future()
-        _ecf_firmas_pendientes[request_id] = {
-            "future": futuro,
-            "websocket": websocket,
-            "empresa_uuid": empresa_uuid,
-            "dispositivo_uuid": dispositivo_uuid,
-        }
+
+def _ecf_parser_seguro():
+
+    return _ecf_lxml.XMLParser(
+        resolve_entities=False,
+        no_network=True,
+        load_dtd=False,
+        remove_blank_text=False,
+        recover=False,
+        huge_tree=False
+    )
+
+
+def _ecf_cargar_certificados_pem(ruta, descripcion):
+
+    archivo = Path(ruta)
+
+    if not archivo.is_file():
+        raise RuntimeError(
+            f"No existe el archivo de certificados: {descripcion}"
+        )
+
+    contenido = archivo.read_bytes()
+
+    bloques = _ecf_re.findall(
+        rb"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----",
+        contenido,
+        flags=_ecf_re.DOTALL
+    )
+
+    if not bloques:
+        raise RuntimeError(
+            f"El archivo {descripcion} no contiene certificados PEM"
+        )
+
+    certificados = []
+
+    for bloque in bloques:
 
         try:
-            await websocket.send_json({
-                **solicitud,
-                "type": "firmar_arecf",
-                "request_id": request_id,
-            })
-            respuesta = await _ecf_asyncio.wait_for(
-                futuro,
-                timeout=_ECF_SIGNER_TIMEOUT
+            certificados.append(
+                _ecf_x509.load_pem_x509_certificate(bloque)
             )
-            if respuesta.get("ok"):
-                return respuesta
-            ultimo_error = respuesta.get("error") or "El firmador local no pudo completar la firma"
-        except _ecf_asyncio.TimeoutError:
-            ultimo_error = "La computadora no respondió a la solicitud de firma"
+
         except Exception as exc:
-            ultimo_error = str(exc)
-        finally:
-            _ecf_firmas_pendientes.pop(request_id, None)
+            raise RuntimeError(
+                f"Certificado PEM inválido en {descripcion}"
+            ) from exc
 
-    raise _ECFFirmadorNoDisponible(ultimo_error or "No hay un firmador local disponible")
+    return certificados
 
 
-@app.post("/fe/recepcion/firmador-ticket")
-async def crear_ticket_firmador_ecf(
-    payload: dict,
-    authorization: str = Header(default=""),
-    db: AsyncSession = Depends(get_db),
-):
-    if not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="Falta el token de sesión")
+def _ecf_cargar_crls_pem(ruta):
 
-    token = authorization.split(" ", 1)[1].strip()
-    usuario = await verificar_token(token, db)
-    empresa_uuid = str(usuario.empresa_uuid or "").strip()
-    dispositivo_uuid = str(payload.get("dispositivo_uuid") or "").strip().lower()
+    archivo = Path(ruta)
 
-    if not empresa_uuid:
-        raise HTTPException(status_code=403, detail="El usuario no tiene una empresa asignada")
-    if not _ecf_re.fullmatch(r"[a-f0-9]{32}", dispositivo_uuid):
-        raise HTTPException(status_code=400, detail="Identificador de dispositivo inválido")
-
-    empresa = (
-        await db.execute(
-            select(Company).where(Company.uuid == empresa_uuid)
+    if not archivo.is_file():
+        raise RuntimeError(
+            "No está configurado el archivo de revocación CRL"
         )
-    ).scalar_one_or_none()
-    if not empresa:
-        raise HTTPException(status_code=404, detail="Empresa no encontrada")
 
-    dispositivo_result = await db.execute(
-        text("""
-            SELECT id
-            FROM empresa_dispositivos
-            WHERE empresa_uuid = :empresa_uuid
-              AND dispositivo_uuid = :dispositivo_uuid
-              AND UPPER(estado) = 'APROBADO'
-            LIMIT 1
-        """),
-        {
-            "empresa_uuid": empresa_uuid,
-            "dispositivo_uuid": dispositivo_uuid,
-        }
-    )
-    if not dispositivo_result.mappings().first():
-        raise HTTPException(status_code=403, detail="El dispositivo no está aprobado para esta empresa")
+    contenido = archivo.read_bytes()
 
-    ticket = secrets.token_urlsafe(32)
-    ticket_hash = sha256_hex(ticket)
-    await db.execute(
-        text("""
-            INSERT INTO ecf_firmador_tickets (
-                ticket_hash, empresa_uuid, dispositivo_uuid,
-                usuario_id, expires_at
-            )
-            VALUES (
-                :ticket_hash, :empresa_uuid, :dispositivo_uuid,
-                :usuario_id, NOW() + INTERVAL '60 seconds'
-            )
-        """),
-        {
-            "ticket_hash": ticket_hash,
-            "empresa_uuid": empresa_uuid,
-            "dispositivo_uuid": dispositivo_uuid,
-            "usuario_id": str(usuario.id),
-        }
+    bloques = _ecf_re.findall(
+        rb"-----BEGIN (?:X509 CRL|CRL)-----.*?-----END (?:X509 CRL|CRL)-----",
+        contenido,
+        flags=_ecf_re.DOTALL
     )
-    await db.commit()
+
+    if not bloques:
+        raise RuntimeError(
+            "El archivo CRL no contiene listas de revocación PEM"
+        )
+
+    crls = []
+
+    for bloque in bloques:
+
+        try:
+            crls.append(
+                _ecf_x509.load_pem_x509_crl(bloque)
+            )
+
+        except Exception as exc:
+            raise RuntimeError(
+                "No se pudo interpretar una lista CRL"
+            ) from exc
+
+    return crls
+
+
+def _ecf_validar_cadena_y_revocacion(
+    certificado,
+    certificados_embebidos,
+    fecha_referencia
+):
+
+    ruta_raices = os.getenv(
+        "ECF_TRUSTED_CA_BUNDLE",
+        ""
+    ).strip()
+
+    ruta_intermedios = os.getenv(
+        "ECF_INTERMEDIATE_CA_BUNDLE",
+        ""
+    ).strip()
+
+    ruta_crl = os.getenv(
+        "ECF_CRL_BUNDLE",
+        ""
+    ).strip()
+
+    if not ruta_raices or not ruta_crl:
+        raise RuntimeError(
+            "Falta configurar ECF_TRUSTED_CA_BUNDLE o ECF_CRL_BUNDLE"
+        )
+
+    raices = _ecf_cargar_certificados_pem(
+        ruta_raices,
+        "autoridades certificadoras confiables"
+    )
+
+    crls = _ecf_cargar_crls_pem(ruta_crl)
+
+    store = _ecf_crypto.X509Store()
+
+    huellas_raices = set()
+
+    for raiz in raices:
+
+        try:
+            restricciones = raiz.extensions.get_extension_for_class(
+                _ecf_x509.BasicConstraints
+            ).value
+
+            if not restricciones.ca:
+                raise RuntimeError(
+                    "El almacén de confianza contiene un certificado que no es CA"
+                )
+
+            huella = raiz.fingerprint(
+                _ecf_hashes.SHA256()
+            )
+
+            if huella in huellas_raices:
+                continue
+
+            huellas_raices.add(huella)
+
+            store.add_cert(
+                _ecf_crypto.X509.from_cryptography(raiz)
+            )
+
+        except RuntimeError:
+            raise
+
+        except Exception as exc:
+            raise RuntimeError(
+                "No se pudo cargar una autoridad certificadora confiable"
+            ) from exc
+
+    huellas_revocacion = set()
+
+    for crl in crls:
+
+        huella_crl = crl.fingerprint(
+            _ecf_hashes.SHA256()
+        )
+
+        if huella_crl in huellas_revocacion:
+            continue
+
+        huellas_revocacion.add(huella_crl)
+
+        try:
+            store.add_crl(crl)
+
+        except Exception as exc:
+            raise RuntimeError(
+                "No se pudo cargar una lista de revocación CRL"
+            ) from exc
+
+    if not crls:
+        raise RuntimeError(
+            "No hay listas de revocación disponibles"
+        )
+
+    store.set_flags(
+        _ecf_crypto.X509StoreFlags.CRL_CHECK
+        | _ecf_crypto.X509StoreFlags.CRL_CHECK_ALL
+    )
+
+    ahora_utc = datetime.now(timezone.utc)
+
+    store.set_time(
+        ahora_utc.replace(tzinfo=None)
+    )
+
+    huella_firmante = certificado.fingerprint(
+        _ecf_hashes.SHA256()
+    )
+
+    certificados_intermedios = []
+
+    if ruta_intermedios:
+
+        certificados_intermedios.extend(
+            _ecf_cargar_certificados_pem(
+                ruta_intermedios,
+                "certificados intermedios"
+            )
+        )
+
+    certificados_intermedios.extend(
+        certificados_embebidos
+    )
+
+    vistos = {
+        huella_firmante,
+        *huellas_raices
+    }
+
+    untrusted = []
+
+    for intermedio in certificados_intermedios:
+
+        huella = intermedio.fingerprint(
+            _ecf_hashes.SHA256()
+        )
+
+        if huella in vistos:
+            continue
+
+        try:
+            restricciones = intermedio.extensions.get_extension_for_class(
+                _ecf_x509.BasicConstraints
+            ).value
+
+            if not restricciones.ca:
+                continue
+
+        except _ecf_x509.ExtensionNotFound:
+            continue
+
+        vistos.add(huella)
+
+        untrusted.append(
+            _ecf_crypto.X509.from_cryptography(intermedio)
+        )
+
+    try:
+
+        contexto = _ecf_crypto.X509StoreContext(
+            store,
+            _ecf_crypto.X509.from_cryptography(certificado),
+            untrusted
+        )
+
+        contexto.verify_certificate()
+
+        cadena = contexto.get_verified_chain()
+
+    except Exception as exc:
+        raise ValueError(
+            "La cadena de certificación no es confiable, "
+            "el certificado está revocado o la CRL no es válida"
+        ) from exc
 
     return {
-        "ok": True,
-        "ticket": ticket,
-        "expires_in": 60,
-        "websocket_path": "/ws/ecf-firma",
+        "cadena_valida": True,
+        "revocacion_verificada_por_crl": True,
+        "cantidad_certificados_cadena": len(cadena)
     }
 
 
+
+def _ecf_verificar_firma_xml(contenido: bytes) -> dict:
+
+    if not isinstance(contenido, bytes) or not contenido:
+        raise ValueError(
+            "El XML recibido está vacío o no es válido"
+        )
+
+    if len(contenido) > _ECF_MAX_XML_BYTES:
+        raise ValueError(
+            "El XML excede el tamaño máximo permitido"
+        )
+
+    if b"<!DOCTYPE" in contenido.upper() or b"<!ENTITY" in contenido.upper():
+        raise ValueError(
+            "El XML contiene declaraciones no permitidas"
+        )
+
+    try:
+        contenido.decode("utf-8-sig")
+
+        root = _ecf_lxml.fromstring(
+            contenido,
+            parser=_ecf_parser_seguro()
+        )
+
+    except UnicodeDecodeError as exc:
+        raise ValueError(
+            "El XML debe estar codificado en UTF-8"
+        ) from exc
+
+    except _ecf_lxml.XMLSyntaxError as exc:
+        raise ValueError(
+            "El XML recibido no tiene una estructura válida"
+        ) from exc
+
+    if root.getroottree().docinfo.doctype:
+        raise ValueError(
+            "No se permite DOCTYPE"
+        )
+
+    if _ecf_local_name(root.tag) != "ecf":
+        raise ValueError(
+            "El documento no tiene raíz ECF"
+        )
+
+    ns = {
+        "ds": _ECF_XMLDSIG_NS
+    }
+
+    firmas = root.xpath(
+        ".//ds:Signature",
+        namespaces=ns
+    )
+
+    firmas_raiz = root.xpath(
+        "./ds:Signature",
+        namespaces=ns
+    )
+
+    if len(firmas) != 1 or len(firmas_raiz) != 1:
+        raise ValueError(
+            "El e-CF debe contener una única firma digital en la raíz"
+        )
+
+    signature = firmas[0]
+
+    signed_info_nodes = signature.findall(
+        "ds:SignedInfo",
+        namespaces=ns
+    )
+
+    signature_value_nodes = signature.findall(
+        "ds:SignatureValue",
+        namespaces=ns
+    )
+
+    key_info_nodes = signature.findall(
+        "ds:KeyInfo",
+        namespaces=ns
+    )
+
+    if (
+        len(signed_info_nodes) != 1
+        or len(signature_value_nodes) != 1
+        or len(key_info_nodes) != 1
+    ):
+        raise ValueError(
+            "La estructura XMLDSig está incompleta"
+        )
+
+    signed_info = signed_info_nodes[0]
+
+    signature_value = (
+        signature_value_nodes[0].text or ""
+    ).strip()
+
+    if not signature_value:
+        raise ValueError(
+            "SignatureValue está vacío"
+        )
+
+    canonicalization_nodes = signed_info.findall(
+        "ds:CanonicalizationMethod",
+        namespaces=ns
+    )
+
+    signature_method_nodes = signed_info.findall(
+        "ds:SignatureMethod",
+        namespaces=ns
+    )
+
+    referencias = signed_info.findall(
+        "ds:Reference",
+        namespaces=ns
+    )
+
+    if (
+        len(canonicalization_nodes) != 1
+        or len(signature_method_nodes) != 1
+        or len(referencias) != 1
+    ):
+        raise ValueError(
+            "SignedInfo no cumple la estructura esperada"
+        )
+
+    canonicalization = canonicalization_nodes[0]
+    signature_method = signature_method_nodes[0]
+
+    if canonicalization.get("Algorithm") != (
+        _ECF_ALGORITMOS_XMLDSIG["canonicalization"]
+    ):
+        raise ValueError(
+            "CanonicalizationMethod no permitido"
+        )
+
+    if signature_method.get("Algorithm") != (
+        _ECF_ALGORITMOS_XMLDSIG["signature"]
+    ):
+        raise ValueError(
+            "El e-CF no utiliza RSA-SHA256"
+        )
+
+    referencia = referencias[0]
+
+    if referencia.get("URI") != "":
+        raise ValueError(
+            "Reference URI debe estar vacío"
+        )
+
+    digest_methods = referencia.findall(
+        "ds:DigestMethod",
+        namespaces=ns
+    )
+
+    digest_values = referencia.findall(
+        "ds:DigestValue",
+        namespaces=ns
+    )
+
+    if len(digest_methods) != 1 or len(digest_values) != 1:
+        raise ValueError(
+            "La referencia no contiene DigestMethod y DigestValue válidos"
+        )
+
+    if digest_methods[0].get("Algorithm") != (
+        _ECF_ALGORITMOS_XMLDSIG["digest"]
+    ):
+        raise ValueError(
+            "El algoritmo DigestMethod debe utilizar SHA-256"
+        )
+
+    if not (digest_values[0].text or "").strip():
+        raise ValueError(
+            "DigestValue está vacío"
+        )
+
+    transforms = referencia.findall(
+        "ds:Transforms/ds:Transform",
+        namespaces=ns
+    )
+
+    algoritmos_transformacion = [
+        transform.get("Algorithm")
+        for transform in transforms
+    ]
+
+    if algoritmos_transformacion != [
+        _ECF_ALGORITMOS_XMLDSIG["enveloped"]
+    ]:
+        raise ValueError(
+            "La transformación de firma no corresponde al perfil esperado"
+        )
+
+    fecha_nodes = root.xpath(
+        "//*[local-name()='FechaHoraFirma']"
+    )
+
+    if len(fecha_nodes) != 1:
+        raise ValueError(
+            "Debe existir una única FechaHoraFirma"
+        )
+
+    fecha_firma_raw = (
+        fecha_nodes[0].text or ""
+    ).strip()
+
+    try:
+        zona_dgii = timezone(
+            timedelta(hours=-4)
+        )
+
+        fecha_firma = datetime.strptime(
+            fecha_firma_raw,
+            "%d-%m-%Y %H:%M:%S"
+        ).replace(
+            tzinfo=zona_dgii
+        )
+
+    except ValueError as exc:
+        raise ValueError(
+            "FechaHoraFirma debe tener formato dd-MM-AAAA HH:mm:ss"
+        ) from exc
+
+    ahora_local = datetime.now(zona_dgii)
+
+    if fecha_firma > ahora_local:
+        raise ValueError(
+            "FechaHoraFirma es posterior a la fecha y hora actual"
+        )
+
+    fecha_firma_utc = fecha_firma.astimezone(
+        timezone.utc
+    )
+
+    key_info = key_info_nodes[0]
+
+    x509_data_nodes = key_info.findall(
+        "ds:X509Data",
+        namespaces=ns
+    )
+
+    if len(x509_data_nodes) != 1 or len(key_info) != 1:
+        raise ValueError(
+            "KeyInfo debe contener un único X509Data"
+        )
+
+    x509_data = x509_data_nodes[0]
+
+    certificados_xml = x509_data.findall(
+        "ds:X509Certificate",
+        namespaces=ns
+    )
+
+    if not certificados_xml or len(certificados_xml) > 10:
+        raise ValueError(
+            "KeyInfo no contiene una cadena X.509 válida"
+        )
+
+    if len(x509_data) != len(certificados_xml):
+        raise ValueError(
+            "X509Data contiene elementos no permitidos"
+        )
+
+    certificados = []
+    huellas = set()
+
+    for elemento in certificados_xml:
+
+        certificado_b64 = _ecf_re.sub(
+            r"\s+",
+            "",
+            elemento.text or ""
+        )
+
+        if not certificado_b64:
+            raise ValueError(
+                "Existe un certificado vacío en X509Data"
+            )
+
+        try:
+            certificado_der = _ecf_base64.b64decode(
+                certificado_b64,
+                validate=True
+            )
+
+            certificado = (
+                _ecf_x509.load_der_x509_certificate(
+                    certificado_der
+                )
+            )
+
+        except Exception as exc:
+            raise ValueError(
+                "No se pudo interpretar un certificado X.509"
+            ) from exc
+
+        huella = certificado.fingerprint(
+            _ecf_hashes.SHA256()
+        )
+
+        if huella not in huellas:
+            huellas.add(huella)
+            certificados.append(certificado)
+
+    certificados_firmantes = []
+    ultimo_error = None
+
+    for candidato in certificados:
+
+        clave_publica = candidato.public_key()
+
+        if not isinstance(
+            clave_publica,
+            _ecf_rsa.RSAPublicKey
+        ):
+            continue
+
+        try:
+            uso = candidato.extensions.get_extension_for_class(
+                _ecf_x509.KeyUsage
+            ).value
+
+            if not uso.digital_signature:
+                continue
+
+        except _ecf_x509.ExtensionNotFound:
+            pass
+
+        try:
+            restricciones = candidato.extensions.get_extension_for_class(
+                _ecf_x509.BasicConstraints
+            ).value
+
+            if restricciones.ca:
+                continue
+
+        except _ecf_x509.ExtensionNotFound:
+            pass
+
+        try:
+            certificado_pem = candidato.public_bytes(
+                _ecf_encoding.PEM
+            )
+
+            clave = _ecf_xmlsec.Key.from_memory(
+                certificado_pem,
+                _ecf_xmlsec.KeyFormat.CERT_PEM,
+                None
+            )
+
+            contexto = _ecf_xmlsec.SignatureContext()
+
+            contexto.enabled_reference_uris = (
+                _ecf_xmlsec.constants.TransformUriTypeEmpty
+            )
+
+            contexto.key = clave
+
+            contexto.verify(signature)
+
+            certificados_firmantes.append(
+                candidato
+            )
+
+        except Exception as exc:
+            ultimo_error = exc
+
+    if len(certificados_firmantes) != 1:
+        raise ValueError(
+            "La firma XMLDSig no es válida o no se pudo identificar "
+            "un único certificado firmante"
+        ) from ultimo_error
+
+    certificado = certificados_firmantes[0]
+
+    if hasattr(certificado, "not_valid_before_utc"):
+        fecha_inicio = certificado.not_valid_before_utc
+        fecha_vencimiento = certificado.not_valid_after_utc
+
+    else:
+        fecha_inicio = certificado.not_valid_before.replace(
+            tzinfo=timezone.utc
+        )
+
+        fecha_vencimiento = certificado.not_valid_after.replace(
+            tzinfo=timezone.utc
+        )
+
+    if not fecha_inicio <= fecha_firma_utc <= fecha_vencimiento:
+        raise ValueError(
+            "El certificado no estaba vigente en FechaHoraFirma"
+        )
+
+    atributos_sn = certificado.subject.get_attributes_for_oid(
+        NameOID.SERIAL_NUMBER
+    )
+
+    if len(atributos_sn) != 1:
+        raise ValueError(
+            "El certificado no contiene un SN único del titular"
+        )
+
+    sn_titular = atributos_sn[0].value.strip()
+
+    if not sn_titular:
+        raise ValueError(
+            "El SN del certificado está vacío"
+        )
+
+    certificados_adicionales = [
+        otro
+        for otro in certificados
+        if otro.fingerprint(_ecf_hashes.SHA256())
+        != certificado.fingerprint(_ecf_hashes.SHA256())
+    ]
+
+    resultado_cadena = (
+        _ecf_validar_cadena_y_revocacion(
+            certificado=certificado,
+            certificados_embebidos=certificados_adicionales,
+            fecha_referencia=fecha_firma_utc
+        )
+    )
+
+    rnc_emisor = _ecf_normalizar_rnc(
+        _ecf_xml_text(root, "RNCEmisor")
+    )
+
+    return {
+        "firma_criptografica_valida": True,
+
+        "cadena_certificacion_valida": (
+            resultado_cadena["cadena_valida"]
+        ),
+
+        "revocacion_verificada": (
+            resultado_cadena["revocacion_verificada_por_crl"]
+        ),
+
+        "cantidad_certificados_cadena": (
+            resultado_cadena["cantidad_certificados_cadena"]
+        ),
+
+        "certificado_x509": certificado,
+
+        "fingerprint_sha256": certificado.fingerprint(
+            _ecf_hashes.SHA256()
+        ).hex(),
+
+        "serial_number": format(
+            certificado.serial_number,
+            "x"
+        ),
+
+        "subject_dn": certificado.subject.rfc4514_string(),
+
+        "issuer_dn": certificado.issuer.rfc4514_string(),
+
+        "sn_titular": sn_titular,
+
+        "sn_normalizado": _ecf_re.sub(
+            r"\D",
+            "",
+            sn_titular
+        ),
+
+        "rnc_emisor": rnc_emisor,
+
+        "fecha_firma": fecha_firma.isoformat(),
+
+        "certificado_vigente_en_fecha_firma": True
+    }
+
+def _ecf_validar_xsd_ecf(contenido: bytes, tipo_ecf: str):
+
+    tipo_ecf = str(tipo_ecf or "").upper().strip()
+
+    if tipo_ecf not in _ECF_TIPOS_PERMITIDOS:
+        raise ValueError("Tipo de e-CF no permitido")
+
+    ruta_xsd = (
+        Path(__file__).resolve().parent
+        / "dgii"
+        / "xsd"
+        / "ecf"
+        / f"{tipo_ecf}-v1.0.xsd"
+    )
+
+    if not ruta_xsd.is_file():
+        raise RuntimeError(
+            f"No se encontró el XSD oficial para {tipo_ecf}"
+        )
+
+    parser = _ecf_parser_seguro()
+
+    try:
+        documento_xsd = _ecf_lxml.parse(
+            str(ruta_xsd),
+            parser
+        )
+
+        esquema = _ecf_lxml.XMLSchema(
+            documento_xsd
+        )
+
+        documento = _ecf_lxml.fromstring(
+            contenido,
+            parser
+        )
+
+        esquema.assertValid(documento)
+
+    except _ecf_lxml.DocumentInvalid as exc:
+
+        error = esquema.error_log.last_error
+
+        detalle = (
+            str(error)
+            if error
+            else "El XML no cumple el XSD"
+        )
+
+        raise ValueError(
+            f"e-CF no válido según el XSD {tipo_ecf}: {detalle}"
+        ) from exc
+
+    except _ecf_lxml.XMLSyntaxError as exc:
+        raise ValueError(
+            "No se pudo interpretar el XML para validar el XSD"
+        ) from exc
+
+    except _ecf_lxml.XMLSchemaParseError as exc:
+        raise RuntimeError(
+            f"El XSD {tipo_ecf} no pudo compilarse"
+        ) from exc
+
+    return True
 
 @app.websocket("/ws/ecf-firma")
 async def websocket_firmador_ecf(
@@ -17502,498 +18237,6 @@ async def websocket_firmador_ecf(
 
 
 
-@app.post("/fe/recepcion/api/ecf")
-async def recibir_ecf_factuplus(
-    request: Request,
-    xml: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
-):
-    _rate_limit(request, limiter_webhook)
-
-    contenido = await xml.read(_ECF_MAX_XML_BYTES + 1)
-
-    if not contenido:
-        raise HTTPException(
-            status_code=400,
-            detail="El archivo XML está vacío"
-        )
-
-    if len(contenido) > _ECF_MAX_XML_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail="El XML excede el tamaño máximo permitido"
-        )
-
-    contenido_mayus = contenido.upper()
-
-    if b"<!DOCTYPE" in contenido_mayus or b"<!ENTITY" in contenido_mayus:
-        raise HTTPException(
-            status_code=400,
-            detail="No se permite DTD ni declaraciones de entidades XML"
-        )
-
-    try:
-        xml_original = contenido.decode("utf-8-sig")
-        root = _ecf_et.fromstring(xml_original)
-
-    except (UnicodeDecodeError, _ecf_et.ParseError):
-        raise HTTPException(
-            status_code=400,
-            detail="El archivo no contiene un XML UTF-8 válido"
-        )
-
-    if _ecf_local_name(root.tag).lower() != "ecf":
-        raise HTTPException(
-            status_code=400,
-            detail="El XML recibido no tiene raíz ECF"
-        )
-
-    rnc_emisor = _ecf_normalizar_rnc(
-        _ecf_xml_text(root, "RNCEmisor")
-    )
-
-    rnc_comprador = _ecf_normalizar_rnc(
-        _ecf_xml_text(root, "RNCComprador")
-    )
-
-    encf = str(
-        _ecf_xml_text(root, "eNCF") or ""
-    ).strip().upper()
-
-    tipo_xml = str(
-        _ecf_xml_text(root, "TipoeCF") or ""
-    ).strip().upper()
-
-    tipo_ecf = (
-        f"E{tipo_xml}"
-        if tipo_xml.isdigit()
-        else tipo_xml or encf[:3]
-    )
-
-    if len(rnc_emisor) not in (9, 11):
-        raise HTTPException(
-            status_code=400,
-            detail="RNC/Cédula del emisor inválido o ausente"
-        )
-
-    if len(rnc_comprador) not in (9, 11):
-        raise HTTPException(
-            status_code=400,
-            detail="RNC/Cédula del comprador inválido o ausente"
-        )
-
-    if tipo_ecf not in _ECF_TIPOS_PERMITIDOS:
-        raise HTTPException(
-            status_code=400,
-            detail="Tipo de e-CF no reconocido"
-        )
-
-    if not _ecf_re.fullmatch(
-        r"E(?:31|32|33|34|41|43|44|45|46|47)\d{10}",
-        encf
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="El e-NCF no cumple la estructura esperada"
-        )
-
-    if encf[:3] != tipo_ecf:
-        raise HTTPException(
-            status_code=400,
-            detail="El tipo de e-CF no coincide con el e-NCF"
-        )
-
-    # Identificar la empresa receptora mediante el RNC comprador.
-    empresa_result = await db.execute(
-        select(Company).where(
-            func.regexp_replace(
-                func.coalesce(Company.rnc, ""),
-                "[^0-9]",
-                "",
-                "g"
-            ) == rnc_comprador
-        )
-    )
-
-    empresa = empresa_result.scalars().first()
-
-    if not empresa:
-        raise HTTPException(
-            status_code=404,
-            detail="No existe una empresa FactuPlus asociada al RNC comprador"
-        )
-
-    empresa_uuid = str(empresa.uuid)
-
-    xml_sha256 = hashlib.sha256(
-        contenido
-    ).hexdigest()
-
-    lock_key = (
-        f"{empresa_uuid}:{rnc_emisor}:{encf}"
-    )
-
-    lock = _ecf_locks_documentos.setdefault(
-        lock_key,
-        _ecf_asyncio.Lock()
-    )
-
-    async with lock:
-
-        factura_id = None
-        acuse_id = None
-        intento_id = None
-        fuerza_motivo = None
-
-        try:
-
-            # Buscar documento existente.
-            existente_result = await db.execute(
-                select(EcfRecibido).where(
-                    EcfRecibido.empresa_uuid == empresa_uuid,
-                    EcfRecibido.rnc_emisor == rnc_emisor,
-                    EcfRecibido.encf == encf
-                ).with_for_update()
-            )
-
-            existente = existente_result.scalar_one_or_none()
-
-            if existente:
-
-                factura_id = existente.id
-
-                mismo_xml = (
-                    existente.xml_sha256 == xml_sha256
-                )
-
-                if mismo_xml:
-
-                    acuse_result = await db.execute(
-                        select(EcfAcuse).where(
-                            EcfAcuse.ecf_recibido_id == factura_id
-                        ).with_for_update()
-                    )
-
-                    acuse_existente = (
-                        acuse_result.scalar_one_or_none()
-                    )
-
-                    if (
-                        acuse_existente
-                        and acuse_existente.xml_arecf_firmado
-                        and acuse_existente.estado == "enviado"
-                    ):
-                        await db.commit()
-
-                        return Response(
-                            content=acuse_existente.xml_arecf_firmado,
-                            media_type="application/xml",
-                            status_code=200
-                        )
-
-                    if acuse_existente:
-                        acuse_existente.estado = "pendiente_firmar"
-                        acuse_existente.error_detalle = None
-                        acuse_existente_id = acuse_existente.id
-
-                    else:
-                        acuse_nuevo = EcfAcuse(
-                            ecf_recibido_id=factura_id,
-                            estado="pendiente_firmar"
-                        )
-
-                        db.add(acuse_nuevo)
-                        await db.flush()
-
-                        acuse_existente_id = acuse_nuevo.id
-
-                    acuse_id = acuse_existente_id
-
-                else:
-
-                    # Mismo emisor y e-NCF con contenido diferente.
-                    fuerza_motivo = 3
-
-            else:
-
-                nuevo_ecf = EcfRecibido(
-                    empresa_uuid=empresa_uuid,
-                    tipo_ecf=tipo_ecf,
-                    rnc_emisor=rnc_emisor,
-                    rnc_comprador=rnc_comprador,
-                    encf=encf,
-                    xml_original=xml_original,
-                    xml_sha256=xml_sha256,
-                    estado_procesamiento="pendiente_revision"
-                )
-
-                db.add(nuevo_ecf)
-
-                await db.flush()
-
-                factura_id = nuevo_ecf.id
-
-                nuevo_acuse = EcfAcuse(
-                    ecf_recibido_id=factura_id,
-                    estado="pendiente_firmar"
-                )
-
-                db.add(nuevo_acuse)
-
-                await db.flush()
-
-                acuse_id = nuevo_acuse.id
-
-            # Registrar el intento.
-            nuevo_intento = EcfRecepcionIntento(
-                empresa_uuid=empresa_uuid,
-                ecf_recibido_id=factura_id,
-                rnc_emisor=rnc_emisor,
-                rnc_comprador=rnc_comprador,
-                encf=encf,
-                xml_sha256=xml_sha256,
-                xml_original=xml_original,
-                estado="recibido",
-                detalle=(
-                    "Duplicado con contenido diferente"
-                    if fuerza_motivo == 3
-                    else None
-                )
-            )
-
-            db.add(nuevo_intento)
-
-            await db.flush()
-
-            intento_id = nuevo_intento.id
-
-            # Guardar antes de solicitar la firma local.
-            await db.commit()
-
-            solicitud = {
-                "rnc_emisor": rnc_emisor,
-                "rnc_comprador": rnc_comprador,
-                "encf": encf,
-                "tipo_ecf": tipo_ecf,
-                "fecha_hora_acuse": datetime.now(
-                    ZoneInfo("America/Santo_Domingo")
-                ).strftime("%d-%m-%Y %H:%M:%S"),
-                "xml_ecf_b64": _ecf_base64.b64encode(
-                    contenido
-                ).decode("ascii"),
-                "motivo_forzado": fuerza_motivo
-            }
-
-            try:
-
-                resultado_firma = (
-                    await _ecf_enviar_a_firmador_local(
-                        empresa_uuid,
-                        solicitud
-                    )
-                )
-
-                if not resultado_firma.get("ok"):
-                    raise ValueError(
-                        resultado_firma.get("error")
-                        or "El firmador no pudo generar el ARECF"
-                    )
-
-                firmado_b64 = str(
-                    resultado_firma.get(
-                        "xml_arecf_firmado_b64"
-                    ) or ""
-                )
-
-                try:
-                    firmado_bytes = _ecf_base64.b64decode(
-                        firmado_b64,
-                        validate=True
-                    )
-
-                    xml_arecf_firmado = firmado_bytes.decode(
-                        "utf-8"
-                    )
-
-                except (
-                    _ecf_binascii.Error,
-                    UnicodeDecodeError,
-                    ValueError
-                ):
-                    raise ValueError(
-                        "El firmador devolvió el ARECF en Base64 inválido"
-                    )
-
-                estado_arecf, motivo_arecf = (
-                    _ecf_xml_arecf_firmado_valido_en_estructura(
-                        xml_arecf_firmado,
-                        {
-                            "rnc_emisor": rnc_emisor,
-                            "rnc_comprador": rnc_comprador,
-                            "encf": encf
-                        }
-                    )
-                )
-
-                if (
-                    fuerza_motivo == 3
-                    and (
-                        estado_arecf != 1
-                        or motivo_arecf != 3
-                    )
-                ):
-                    raise ValueError(
-                        "El firmador no devolvió el ARECF de duplicado solicitado"
-                    )
-
-                if fuerza_motivo == 3:
-
-                    intento = await db.get(
-                        EcfRecepcionIntento,
-                        intento_id
-                    )
-
-                    intento.estado = "duplicado"
-                    intento.http_status = 200
-                    intento.codigo_respuesta = estado_arecf
-                    intento.xml_arecf_firmado = xml_arecf_firmado
-                    intento.detalle = (
-                        "e-NCF duplicado con contenido diferente"
-                    )
-
-                else:
-
-                    acuse = await db.get(
-                        EcfAcuse,
-                        acuse_id
-                    )
-
-                    factura = await db.get(
-                        EcfRecibido,
-                        factura_id
-                    )
-
-                    intento = await db.get(
-                        EcfRecepcionIntento,
-                        intento_id
-                    )
-
-                    acuse.estado = "enviado"
-                    acuse.codigo_estado = estado_arecf
-                    acuse.codigo_motivo = motivo_arecf
-                    acuse.xml_arecf_firmado = xml_arecf_firmado
-                    acuse.fecha_generacion = func.now()
-                    acuse.fecha_envio = func.now()
-                    acuse.error_detalle = None
-
-                    factura.estado_procesamiento = (
-                        "recibido"
-                        if estado_arecf == 0
-                        else "rechazado"
-                    )
-
-                    intento.estado = "procesado"
-                    intento.http_status = 200
-                    intento.codigo_respuesta = estado_arecf
-                    intento.xml_arecf_firmado = xml_arecf_firmado
-                    intento.detalle = (
-                        "e-CF recibido"
-                        if estado_arecf == 0
-                        else f"e-CF no recibido; motivo {motivo_arecf}"
-                    )
-
-                await db.commit()
-
-                return Response(
-                    content=xml_arecf_firmado,
-                    media_type="application/xml",
-                    status_code=200
-                )
-
-            except _ECFFirmadorNoDisponible as exc:
-
-                await db.rollback()
-
-                if fuerza_motivo != 3:
-
-                    acuse = await db.get(
-                        EcfAcuse,
-                        acuse_id
-                    )
-
-                    if acuse:
-                        acuse.estado = "pendiente_firmar"
-                        acuse.error_detalle = str(exc)[:1000]
-
-                intento = await db.get(
-                    EcfRecepcionIntento,
-                    intento_id
-                )
-
-                if intento:
-                    intento.estado = "error"
-                    intento.http_status = 503
-                    intento.detalle = str(exc)[:1000]
-
-                await db.commit()
-
-                raise HTTPException(
-                    status_code=503,
-                    detail=(
-                        "El firmador local de esta empresa "
-                        "no está disponible. El XML quedó pendiente "
-                        "y el emisor deberá reintentar."
-                    )
-                )
-
-        except HTTPException:
-            await db.rollback()
-            raise
-
-        except Exception as exc:
-
-            await db.rollback()
-
-            logger.exception(
-                "Error procesando recepción e-CF empresa=%s encf=%s",
-                empresa_uuid,
-                encf
-            )
-
-            try:
-
-                if factura_id and fuerza_motivo != 3:
-
-                    acuse = await db.get(
-                        EcfAcuse,
-                        acuse_id
-                    )
-
-                    if acuse:
-                        acuse.estado = "error"
-                        acuse.error_detalle = str(exc)[:1000]
-
-                if intento_id:
-
-                    intento = await db.get(
-                        EcfRecepcionIntento,
-                        intento_id
-                    )
-
-                    if intento:
-                        intento.estado = "error"
-                        intento.http_status = 500
-                        intento.detalle = str(exc)[:1000]
-
-                await db.commit()
-
-            except Exception:
-                await db.rollback()
-
-            raise HTTPException(
-                status_code=500,
-                detail="No se pudo completar la recepción del e-CF"
-            )
 
 """ @app.post("/fe/aprobacioncomercial/api/ecf")
 async def recibir_aprobacion_comercial(
@@ -18898,6 +19141,881 @@ async def enviar_evento(
             empresa_uuid,
             set()
         ).discard(websocket)
+        
+async def _ecf_firmar_arecf_servidor(
+    db: AsyncSession,
+    empresa_uuid: str,
+    rnc_emisor: str,
+    rnc_comprador: str,
+    encf: str,
+    estado: int,
+    codigo_motivo: int | None = None
+) -> bytes:
+
+    import uuid
+
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.serialization import (
+        Encoding,
+        PrivateFormat,
+        NoEncryption,
+        PublicFormat
+    )
+    from cryptography.hazmat.primitives.serialization.pkcs12 import (
+        load_key_and_certificates
+    )
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    if estado not in (0, 1):
+        raise ValueError("El estado del ARECF debe ser 0 o 1")
+
+    if estado == 1 and codigo_motivo is None:
+        raise ValueError(
+            "Debe indicar el código de motivo cuando el ARECF es rechazado"
+        )
+
+    try:
+        empresa_id = uuid.UUID(str(empresa_uuid))
+    except (ValueError, TypeError):
+        raise ValueError("El UUID de la empresa no es válido")
+
+    registro = await db.scalar(
+        select(EcfCertificado)
+        .where(
+            EcfCertificado.empresa_uuid == empresa_id,
+            EcfCertificado.estado == "activo"
+        )
+        .order_by(EcfCertificado.creado_en.desc())
+        .limit(1)
+    )
+
+    if not registro:
+        raise RuntimeError(
+            "La empresa no tiene un certificado electrónico activo"
+        )
+
+    certificado_bytes, cert_password = (
+        _ecf_descifrar_certificado(registro)
+    )
+
+    private_key, cert, cadena = load_key_and_certificates(
+        certificado_bytes,
+        cert_password.encode("utf-8")
+    )
+
+    if not private_key or not cert:
+        raise RuntimeError(
+            "El PKCS#12 no contiene certificado y clave privada"
+        )
+
+    if not isinstance(private_key, rsa.RSAPrivateKey):
+        raise RuntimeError(
+            "El certificado debe utilizar una clave RSA"
+        )
+
+    ahora = datetime.now(timezone.utc)
+
+    fecha_inicio = cert.not_valid_before_utc
+    fecha_vencimiento = cert.not_valid_after_utc
+
+    if ahora < fecha_inicio or ahora > fecha_vencimiento:
+        raise RuntimeError(
+            "El certificado no está vigente"
+        )
+
+    clave_publica_privada = private_key.public_key().public_bytes(
+        Encoding.DER,
+        PublicFormat.SubjectPublicKeyInfo
+    )
+
+    clave_publica_certificado = cert.public_key().public_bytes(
+        Encoding.DER,
+        PublicFormat.SubjectPublicKeyInfo
+    )
+
+    if clave_publica_privada != clave_publica_certificado:
+        raise RuntimeError(
+            "La clave privada no corresponde al certificado"
+        )
+
+    fingerprint = cert.fingerprint(hashes.SHA256()).hex()
+
+    if fingerprint.lower() != registro.fingerprint_sha256.lower():
+        raise RuntimeError(
+            "La huella digital del certificado no coincide"
+        )
+
+    serial = format(cert.serial_number, "x")
+
+    if serial.lower() != registro.serial_number.lower():
+        raise RuntimeError(
+            "El número de serie del certificado no coincide"
+        )
+
+    if cert.subject.rfc4514_string() != registro.subject_dn:
+        raise RuntimeError(
+            "El titular del certificado no coincide con el registro"
+        )
+
+    if cert.issuer.rfc4514_string() != registro.issuer_dn:
+        raise RuntimeError(
+            "El emisor del certificado no coincide con el registro"
+        )
+
+    zona_dgii = ZoneInfo("America/Santo_Domingo")
+
+    fecha_acuse = datetime.now(
+        zona_dgii
+    ).strftime("%d-%m-%Y %H:%M:%S")
+
+    root = _ecf_lxml.Element("arecf")
+
+    detalle = _ecf_lxml.SubElement(
+        root,
+        "detalleacusederecibo"
+    )
+
+    _ecf_lxml.SubElement(
+        detalle,
+        "version"
+    ).text = "1.0"
+
+    _ecf_lxml.SubElement(
+        detalle,
+        "rncemisor"
+    ).text = str(rnc_emisor).strip()
+
+    _ecf_lxml.SubElement(
+        detalle,
+        "rnccomprador"
+    ).text = str(rnc_comprador).strip()
+
+    _ecf_lxml.SubElement(
+        detalle,
+        "encf"
+    ).text = str(encf).strip()
+
+    _ecf_lxml.SubElement(
+        detalle,
+        "estado"
+    ).text = str(estado)
+
+    if estado == 1:
+        _ecf_lxml.SubElement(
+            detalle,
+            "codigomotivonorecibido"
+        ).text = str(codigo_motivo)
+
+    _ecf_lxml.SubElement(
+        detalle,
+        "fechahoraacuserecibo"
+    ).text = fecha_acuse
+
+    signature = _ecf_xmlsec.template.create(
+        root,
+        _ecf_xmlsec.Transform.C14N,
+        _ecf_xmlsec.Transform.RSA_SHA256,
+        ns="ds"
+    )
+
+    root.append(signature)
+
+    referencia = _ecf_xmlsec.template.add_reference(
+        signature,
+        _ecf_xmlsec.Transform.SHA256,
+        uri=""
+    )
+
+    _ecf_xmlsec.template.add_transform(
+        referencia,
+        _ecf_xmlsec.Transform.ENVELOPED
+    )
+
+    key_info = _ecf_xmlsec.template.ensure_key_info(
+        signature
+    )
+
+    x509_data = _ecf_xmlsec.template.add_x509_data(
+        key_info
+    )
+
+    _ecf_xmlsec.template.x509_data_add_certificate(
+        x509_data
+    )
+
+    private_key_pem = private_key.private_bytes(
+        Encoding.PEM,
+        PrivateFormat.PKCS8,
+        NoEncryption()
+    )
+
+    cert_pem = cert.public_bytes(
+        Encoding.PEM
+    )
+
+    signing_key = _ecf_xmlsec.Key.from_memory(
+        private_key_pem,
+        _ecf_xmlsec.KeyFormat.PEM,
+        None
+    )
+
+    signing_key.load_cert_from_memory(
+        cert_pem,
+        _ecf_xmlsec.KeyFormat.CERT_PEM
+    )
+
+    signing_context = _ecf_xmlsec.SignatureContext()
+    signing_context.key = signing_key
+    signing_context.sign(signature)
+
+    contenido_firmado = _ecf_lxml.tostring(
+        root,
+        encoding="UTF-8",
+        xml_declaration=True,
+        standalone=True
+    )
+
+    ruta_xsd = (
+        Path(__file__).resolve().parent
+        / "dgii"
+        / "xsd"
+        / "arecf"
+        / "ARECF-v1.0.xsd"
+    )
+
+    if not ruta_xsd.is_file():
+        raise RuntimeError(
+            "No se encontró el XSD oficial ARECF-v1.0.xsd"
+        )
+
+    parser = _ecf_parser_seguro()
+
+    try:
+        documento_xsd = _ecf_lxml.parse(
+            str(ruta_xsd),
+            parser
+        )
+
+        esquema = _ecf_lxml.XMLSchema(
+            documento_xsd
+        )
+
+        documento = _ecf_lxml.fromstring(
+            contenido_firmado,
+            parser
+        )
+
+        esquema.assertValid(documento)
+
+    except _ecf_lxml.DocumentInvalid as exc:
+        error = esquema.error_log.last_error
+
+        raise RuntimeError(
+            "El ARECF generado no cumple el XSD: "
+            + (str(error) if error else str(exc))
+        ) from exc
+
+    except _ecf_lxml.XMLSyntaxError as exc:
+        raise RuntimeError(
+            "No se pudo interpretar el ARECF generado"
+        ) from exc
+
+    firma_generada = documento.xpath(
+        "./ds:Signature",
+        namespaces={"ds": _ECF_XMLDSIG_NS}
+    )
+
+    if len(firma_generada) != 1:
+        raise RuntimeError(
+            "No se encontró la firma digital del ARECF"
+        )
+
+    verify_key = _ecf_xmlsec.Key.from_memory(
+        cert_pem,
+        _ecf_xmlsec.KeyFormat.CERT_PEM,
+        None
+    )
+
+    verify_context = _ecf_xmlsec.SignatureContext()
+    verify_context.key = verify_key
+    verify_context.verify(firma_generada[0])
+
+    return contenido_firmado
+
+@app.post("/fe/recepcion/api/ecf")
+async def recibir_ecf_factuplus(
+    request: Request,
+    xml: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    _rate_limit(request, limiter_webhook)
+
+    contenido = await xml.read(
+        _ECF_MAX_XML_BYTES + 1
+    )
+
+    if not contenido:
+        raise HTTPException(
+            status_code=400,
+            detail="El archivo XML está vacío"
+        )
+
+    if len(contenido) > _ECF_MAX_XML_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="El XML excede el tamaño máximo permitido"
+        )
+
+    if (
+        b"<!DOCTYPE" in contenido.upper()
+        or b"<!ENTITY" in contenido.upper()
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="No se permiten declaraciones DTD ni entidades XML"
+        )
+
+    try:
+        xml_original = contenido.decode("utf-8-sig")
+
+        root = _ecf_lxml.fromstring(
+            contenido,
+            parser=_ecf_parser_seguro()
+        )
+
+    except (UnicodeDecodeError, _ecf_lxml.XMLSyntaxError):
+        raise HTTPException(
+            status_code=400,
+            detail="El archivo no contiene un XML UTF-8 válido"
+        )
+
+    if root.getroottree().docinfo.doctype:
+        raise HTTPException(
+            status_code=400,
+            detail="No se permiten declaraciones DOCTYPE"
+        )
+
+    if _ecf_local_name(root.tag) != "ecf":
+        raise HTTPException(
+            status_code=400,
+            detail="El XML recibido no tiene raíz ECF"
+        )
+
+    rnc_emisor = _ecf_normalizar_rnc(
+        _ecf_xml_text(root, "RNCEmisor")
+    )
+
+    rnc_comprador = _ecf_normalizar_rnc(
+        _ecf_xml_text(root, "RNCComprador")
+    )
+
+    encf = str(
+        _ecf_xml_text(root, "eNCF") or ""
+    ).strip().upper()
+
+    tipo_xml = str(
+        _ecf_xml_text(root, "TipoeCF") or ""
+    ).strip().upper()
+
+    tipo_ecf = (
+        f"E{tipo_xml}"
+        if tipo_xml.isdigit()
+        else tipo_xml or encf[:3]
+    )
+
+    if len(rnc_emisor) not in (9, 11):
+        raise HTTPException(
+            status_code=400,
+            detail="RNC/Cédula del emisor inválido o ausente"
+        )
+
+    if len(rnc_comprador) not in (9, 11):
+        raise HTTPException(
+            status_code=400,
+            detail="RNC/Cédula del comprador inválido o ausente"
+        )
+
+    if tipo_ecf not in _ECF_TIPOS_PERMITIDOS:
+        raise HTTPException(
+            status_code=400,
+            detail="Tipo de e-CF no reconocido"
+        )
+
+    if not _ecf_re.fullmatch(
+        r"E(?:31|32|33|34|41|43|44|45|46|47)\d{10}",
+        encf
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="El e-NCF no cumple la estructura esperada"
+        )
+
+    if encf[:3] != tipo_ecf:
+        raise HTTPException(
+            status_code=400,
+            detail="El tipo de e-CF no coincide con el e-NCF"
+        )
+
+    try:
+        empresa_result = await db.execute(
+            select(Company).where(
+                func.regexp_replace(
+                    func.coalesce(Company.rnc, ""),
+                    "[^0-9]",
+                    "",
+                    "g"
+                ) == rnc_comprador
+            )
+        )
+
+        empresa = empresa_result.scalars().first()
+
+    except Exception:
+        await db.rollback()
+        logger.exception("Error identificando empresa receptora")
+
+        raise HTTPException(
+            status_code=503,
+            detail="No se pudo identificar la empresa receptora"
+        )
+
+    if not empresa:
+        raise HTTPException(
+            status_code=404,
+            detail="No existe una empresa asociada al RNC comprador"
+        )
+
+    empresa_uuid = str(empresa.uuid)
+
+    xml_sha256 = hashlib.sha256(
+        contenido
+    ).hexdigest()
+
+    lock_key = (
+        f"{empresa_uuid}:{rnc_emisor}:{encf}"
+    )
+
+    factura_id = None
+    acuse_id = None
+    intento_id = None
+    fuerza_motivo = None
+
+    try:
+
+        # Bloqueo persistente para evitar procesamientos simultáneos
+        # del mismo emisor y e-NCF entre diferentes workers.
+
+        await db.execute(
+            text("""
+                SELECT pg_advisory_xact_lock(
+                    hashtextextended(:lock_key, 0)
+                )
+            """),
+            {
+                "lock_key": lock_key
+            }
+        )
+
+        # Buscar comprobante existente.
+
+        existente_result = await db.execute(
+            select(EcfRecibido).where(
+                EcfRecibido.empresa_uuid == empresa_uuid,
+                EcfRecibido.rnc_emisor == rnc_emisor,
+                EcfRecibido.encf == encf
+            ).with_for_update()
+        )
+
+        existente = existente_result.scalar_one_or_none()
+
+        if existente:
+
+            factura_id = existente.id
+
+            mismo_xml = (
+                existente.xml_sha256 == xml_sha256
+            )
+
+            if mismo_xml:
+
+                acuse_result = await db.execute(
+                    select(EcfAcuse)
+                    .where(
+                        EcfAcuse.ecf_recibido_id == factura_id
+                    )
+                    .with_for_update()
+                )
+
+                acuse = acuse_result.scalar_one_or_none()
+
+                if (
+                    acuse
+                    and acuse.xml_arecf_firmado
+                    and acuse.estado == "enviado"
+                ):
+
+                    xml_anterior = acuse.xml_arecf_firmado
+
+                    await db.commit()
+
+                    return Response(
+                        content=xml_anterior,
+                        media_type="application/xml",
+                        status_code=200
+                    )
+
+                if acuse:
+
+                    acuse.estado = "pendiente_firmar"
+                    acuse.error_detalle = None
+                    acuse_id = acuse.id
+
+                else:
+
+                    nuevo_acuse = EcfAcuse(
+                        ecf_recibido_id=factura_id,
+                        estado="pendiente_firmar"
+                    )
+
+                    db.add(nuevo_acuse)
+
+                    await db.flush()
+
+                    acuse_id = nuevo_acuse.id
+
+            else:
+
+                # El mismo e-NCF llegó con contenido diferente.
+                fuerza_motivo = 3
+
+        else:
+
+            nuevo_ecf = EcfRecibido(
+                empresa_uuid=empresa_uuid,
+                tipo_ecf=tipo_ecf,
+                rnc_emisor=rnc_emisor,
+                rnc_comprador=rnc_comprador,
+                encf=encf,
+                xml_original=xml_original,
+                xml_sha256=xml_sha256,
+                estado_procesamiento="pendiente_revision"
+            )
+
+            db.add(nuevo_ecf)
+
+            await db.flush()
+
+            factura_id = nuevo_ecf.id
+
+            nuevo_acuse = EcfAcuse(
+                ecf_recibido_id=factura_id,
+                estado="pendiente_firmar"
+            )
+
+            db.add(nuevo_acuse)
+
+            await db.flush()
+
+            acuse_id = nuevo_acuse.id
+
+        # Registrar intento de recepción.
+
+        nuevo_intento = EcfRecepcionIntento(
+            empresa_uuid=empresa_uuid,
+            ecf_recibido_id=factura_id,
+            rnc_emisor=rnc_emisor,
+            rnc_comprador=rnc_comprador,
+            encf=encf,
+            xml_sha256=xml_sha256,
+            xml_original=xml_original,
+            estado="recibido",
+            detalle=(
+                "Duplicado con contenido diferente"
+                if fuerza_motivo == 3
+                else None
+            )
+        )
+
+        db.add(nuevo_intento)
+
+        await db.flush()
+
+        intento_id = nuevo_intento.id
+
+        # ======================================================
+        # VALIDACIÓN Y CLASIFICACIÓN
+        # ======================================================
+
+        estado_arecf = 0
+        motivo_arecf = None
+        detalle_validacion = None
+
+        if fuerza_motivo == 3:
+
+            estado_arecf = 1
+            motivo_arecf = 3
+
+        else:
+
+            # 1. Validar contra el XSD oficial.
+
+            try:
+
+                _ecf_validar_xsd_ecf(
+                    contenido,
+                    tipo_ecf
+                )
+
+            except ValueError as exc:
+
+                estado_arecf = 1
+                motivo_arecf = 1
+                detalle_validacion = str(exc)
+
+            except RuntimeError as exc:
+
+                raise HTTPException(
+                    status_code=503,
+                    detail=str(exc)
+                )
+
+            # 2. Verificar firma digital si la estructura es válida.
+
+            if estado_arecf == 0:
+
+                try:
+
+                    resultado_firma = (
+                        _ecf_verificar_firma_xml(
+                            contenido
+                        )
+                    )
+
+                    if not resultado_firma.get(
+                        "firma_criptografica_valida"
+                    ):
+                        raise ValueError(
+                            "La firma digital del e-CF no es válida"
+                        )
+
+                    if not resultado_firma.get(
+                        "cadena_certificacion_valida"
+                    ):
+                        raise ValueError(
+                            "La cadena del certificado no es confiable"
+                        )
+
+                    if not resultado_firma.get(
+                        "revocacion_verificada"
+                    ):
+                        raise RuntimeError(
+                            "No se pudo verificar la revocación"
+                        )
+
+                    if (
+                        resultado_firma.get("rnc_emisor")
+                        != rnc_emisor
+                    ):
+                        raise ValueError(
+                            "El RNC emisor no coincide con el XML firmado"
+                        )
+
+                    # La autorización del titular como delegado del
+                    # emisor debe verificarse antes de aceptar el e-CF.
+
+                    resultado_validacion_firma = resultado_firma
+
+                except ValueError as exc:
+
+                    estado_arecf = 1
+                    motivo_arecf = 2
+                    detalle_validacion = str(exc)
+
+                except RuntimeError as exc:
+
+                    raise HTTPException(
+                        status_code=503,
+                        detail=(
+                            "No está disponible la validación de confianza "
+                            "del certificado del emisor"
+                        )
+                    ) from exc
+
+        # ======================================================
+        # GENERAR Y FIRMAR ARECF EN EL SERVIDOR
+        # ======================================================
+
+        try:
+
+            xml_arecf_firmado_bytes = (
+                await _ecf_firmar_arecf_servidor(
+                    db=db,
+                    empresa_uuid=empresa_uuid,
+                    rnc_emisor=rnc_emisor,
+                    rnc_comprador=rnc_comprador,
+                    encf=encf,
+                    estado=estado_arecf,
+                    motivo=motivo_arecf
+                )
+            )
+
+            xml_arecf_firmado = (
+                xml_arecf_firmado_bytes.decode("utf-8")
+            )
+
+        except Exception as exc:
+
+            logger.exception(
+                "Error firmando ARECF en servidor empresa=%s encf=%s",
+                empresa_uuid,
+                encf
+            )
+
+            if acuse_id:
+
+                acuse = await db.get(
+                    EcfAcuse,
+                    acuse_id
+                )
+
+                if acuse:
+                    acuse.estado = "pendiente_firmar"
+                    acuse.error_detalle = str(exc)[:1000]
+
+            intento = await db.get(
+                EcfRecepcionIntento,
+                intento_id
+            )
+
+            if intento:
+                intento.estado = "error"
+                intento.http_status = 503
+                intento.detalle = str(exc)[:1000]
+
+            await db.commit()
+
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "No se pudo generar el ARECF. "
+                    "El documento quedó registrado para reintento."
+                )
+            )
+
+        # ======================================================
+        # GUARDAR RESULTADO
+        # ======================================================
+
+        intento = await db.get(
+            EcfRecepcionIntento,
+            intento_id
+        )
+
+        if fuerza_motivo == 3:
+
+            intento.estado = "duplicado"
+            intento.http_status = 200
+            intento.codigo_respuesta = estado_arecf
+            intento.xml_arecf_firmado = xml_arecf_firmado
+            intento.detalle = (
+                "e-NCF duplicado con contenido diferente"
+            )
+
+        else:
+
+            acuse = await db.get(
+                EcfAcuse,
+                acuse_id
+            )
+
+            factura = await db.get(
+                EcfRecibido,
+                factura_id
+            )
+
+            acuse.estado = "enviado"
+            acuse.codigo_estado = estado_arecf
+            acuse.codigo_motivo = motivo_arecf
+            acuse.xml_arecf_firmado = xml_arecf_firmado
+            acuse.fecha_generacion = func.now()
+            acuse.fecha_envio = func.now()
+            acuse.error_detalle = None
+
+            factura.estado_procesamiento = (
+                "recibido"
+                if estado_arecf == 0
+                else "rechazado"
+            )
+
+            intento.estado = "procesado"
+            intento.http_status = 200
+            intento.codigo_respuesta = estado_arecf
+            intento.xml_arecf_firmado = xml_arecf_firmado
+
+            intento.detalle = (
+                "e-CF recibido"
+                if estado_arecf == 0
+                else (
+                    f"e-CF no recibido; "
+                    f"motivo {motivo_arecf}: "
+                    f"{detalle_validacion or ''}"
+                )
+            )
+
+        await db.commit()
+
+        logger.info(
+            "ECF RECEPCION PROCESADA empresa=%s emisor=%s encf=%s estado=%s motivo=%s",
+            empresa_uuid,
+            rnc_emisor,
+            encf,
+            estado_arecf,
+            motivo_arecf
+        )
+
+        return Response(
+            content=xml_arecf_firmado,
+            media_type="application/xml",
+            status_code=200
+        )
+
+    except HTTPException:
+        await db.rollback()
+        raise
+
+    except IntegrityError:
+
+        await db.rollback()
+
+        logger.exception(
+            "Conflicto de integridad en recepción ECF empresa=%s encf=%s",
+            empresa_uuid,
+            encf
+        )
+
+        raise HTTPException(
+            status_code=409,
+            detail="Conflicto al registrar el comprobante electrónico"
+        )
+
+    except Exception:
+
+        await db.rollback()
+
+        logger.exception(
+            "Error procesando recepción ECF empresa=%s encf=%s",
+            empresa_uuid,
+            encf
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudo completar la recepción del e-CF"
+        )
+
 
 async def obtener_siguiente_venta_detalle_cursor(
     db: AsyncSession,
