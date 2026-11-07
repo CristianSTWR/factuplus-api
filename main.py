@@ -1554,6 +1554,13 @@ def build_response(
             "last_sync_at": iso_or_none(get_attr(lic, "last_sync_at", None)),
             "cancel_requested": bool(get_attr(lic, "cancel_requested", False)),
             "paid_through": iso_or_none(paid_through_final),
+            
+            "limits": {
+                "max_devices": get_attr(lic, "max_devices", 1),
+                "max_cajas": get_attr(lic, "max_cajas", None),
+                "max_usuarios": get_attr(lic, "max_usuarios", None),
+                "max_roles": get_attr(lic, "max_roles", None)
+            }
         },
         "paypal": {
             # ✅ NO confundir más:
@@ -1669,6 +1676,13 @@ async def verify_license(
                 "last_sync_at": iso_or_none(get_attr(lic, "last_sync_at", None)),
                 "cancel_requested": bool(get_attr(lic, "cancel_requested", False)),
                 "paid_through": iso_or_none(get_attr(lic, "paid_through", None)),
+
+                "limits": {
+                    "max_devices": get_attr(lic, "max_devices", 1),
+                    "max_cajas": get_attr(lic, "max_cajas", None),
+                    "max_usuarios": get_attr(lic, "max_usuarios", None),
+                    "max_roles": get_attr(lic, "max_roles", None)
+                }
             },
             "paypal": None,
         }

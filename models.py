@@ -64,6 +64,24 @@ class License(Base):
         nullable=False,
         server_default=text("1")
     )
+    
+    max_cajas: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        default=None
+    )
+
+    max_usuarios: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        default=None
+    )
+
+    max_roles: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        default=None
+    )
 
     expires_at: Mapped[datetime | None] = mapped_column(
     DateTime(timezone=True),
