@@ -3296,6 +3296,57 @@ async def sync_batch(
                         )
 
                         db.add(detalle)
+
+                # A sale can be sent again after an abono.  The sale id and
+                # every payment id are stable, so this is an idempotent upsert
+                # rather than a second sale or a duplicate payment.
+                if exists:
+                    version_recibida = int(payload.get("version", 1))
+
+                    if version_recibida > exists.version:
+                        exists.monto_pagado = Decimal(str(payload.get("monto_pagado", 0)))
+                        exists.monto_pendiente = Decimal(str(payload.get("monto_pendiente", 0)))
+                        exists.cambio = Decimal(str(payload.get("cambio", 0)))
+                        exists.estado = payload.get("estado", exists.estado)
+                        exists.sync_status = "synced"
+                        exists.version = version_recibida
+                        exists.updated_at = parse_datetime(payload["updated_at"]) if payload.get("updated_at") else datetime.now(timezone.utc)
+                        exists.sync_cursor = await obtener_siguiente_ventas_cursor(db, empresa_uuid)
+
+                    for pago_data in payload.get("pagos", []):
+                        pago_id = UUID(pago_data["id"])
+                        pago_q = await db.execute(
+                            select(Pago).where(
+                                Pago.id == pago_id,
+                                Pago.empresa_uuid == empresa_uuid
+                            )
+                        )
+
+                        if pago_q.scalar_one_or_none():
+                            continue
+
+                        pago = Pago(
+                            id=pago_id,
+                            empresa_uuid=empresa_uuid,
+                            cliente_id=UUID(pago_data["cliente_id"]) if pago_data.get("cliente_id") else None,
+                            venta_id=venta_id,
+                            metodo_pago_id=UUID(pago_data["metodo_pago_id"]),
+                            monto=Decimal(str(pago_data.get("monto", 0))),
+                            referencia=pago_data.get("referencia"),
+                            autorizacion=pago_data.get("autorizacion"),
+                            ultimos_4=pago_data.get("ultimos_4"),
+                            banco=pago_data.get("banco"),
+                            observacion=pago_data.get("observacion"),
+                            estado=pago_data.get("estado", "aprobado"),
+                            fecha=parse_datetime(pago_data["fecha"]) if pago_data.get("fecha") else datetime.now(timezone.utc),
+                            sync_status="synced",
+                            version=int(pago_data.get("version", 1)),
+                            deleted_at=parse_datetime(pago_data["deleted_at"]) if pago_data.get("deleted_at") else None,
+                            created_at=parse_datetime(pago_data["created_at"]) if pago_data.get("created_at") else datetime.now(timezone.utc),
+                            updated_at=parse_datetime(pago_data["updated_at"]) if pago_data.get("updated_at") else datetime.now(timezone.utc),
+                            sync_cursor=await obtener_siguiente_pagos_cursor(db, empresa_uuid)
+                        )
+                        db.add(pago)
             
             elif item_type == "movimiento_stock":
 
