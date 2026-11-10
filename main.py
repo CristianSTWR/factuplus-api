@@ -5199,6 +5199,11 @@ async def sync_batch(
                             0
                         ),
 
+                        margen=payload.get(
+                            "costo",
+                            0
+                        ),
+                        
                         costo=payload.get(
                             "costo",
                             0
@@ -8015,6 +8020,7 @@ async def productos_changes(
                 "nombre": p.nombre,
                 "precio": float(p.precio or 0),
                 "costo": float(p.costo or 0),
+                "margen": float(p.margen or 0),
                 "stock": float(p.stock or 0),
                 "stock_minimo": float(p.stock_minimo or 0),
                 "itbis": float(p.itbis or 0),
@@ -14114,6 +14120,7 @@ async def restore_productos_changes(
                 "es_balanza": p.es_balanza,
                 "nombre": p.nombre,
                 "precio": float(p.precio or 0),
+                "margen": float(p.margen or 0),
                 "costo": float(p.costo or 0),
                 "stock": float(p.stock or 0),
                 "stock_minimo": float(p.stock_minimo or 0),

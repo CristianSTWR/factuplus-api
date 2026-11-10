@@ -1695,6 +1695,13 @@ class Producto(Base):
         server_default=text("0")
     )
 
+    margen: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+    
     costo: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
