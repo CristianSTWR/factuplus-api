@@ -4254,8 +4254,8 @@ async def sync_batch(
                         )
                         
                         eventos_ws.append({
-                            "tipo": "caja_actualizada",
-                            "accion": "eliminado",
+                            "tipo": "caja_asignada",
+                            "accion": "asignar_caja",
                             "empresa_uuid": str(
                                 empresa_uuid
                             ),
@@ -4358,6 +4358,18 @@ async def sync_batch(
                         if payload.get("updated_at")
                         else None
                     )
+                    
+                    eventos_ws.append({
+                        "tipo": "caja_asignada",
+                        "accion": "asignar_caja",
+                        "empresa_uuid": str(
+                            empresa_uuid
+                        ),
+                        "caja_id": str(
+                            caja_id
+                        ),
+                        "version": caja.version
+                    })
 
                     await db.flush()
         
@@ -4408,18 +4420,6 @@ async def sync_batch(
                         timezone.utc
                     )
 
-                    eventos_ws.append({
-                        "tipo": "caja_actualizada",
-                        "accion": "eliminado",
-                        "empresa_uuid": str(
-                            empresa_uuid
-                        ),
-                        "caja_id": str(
-                            caja_id
-                        ),
-                        "version": caja.version
-                    })
-                    
                     eventos_ws.append({
                         "tipo": "caja_actualizada",
                         "accion": "eliminado",
