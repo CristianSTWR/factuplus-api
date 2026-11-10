@@ -4253,21 +4253,21 @@ async def sync_batch(
                                 created_at
                         )
                         
-                        eventos_ws.append({
-                            "tipo": "caja_asignada",
-                            "accion": "asignar_caja",
-                            "empresa_uuid": str(
-                                empresa_uuid
-                            ),
-                            "caja_id": str(
-                                caja_id
-                            ),
-                            "version": caja.version
-                        })
+                       
 
                         db.add(caja)
 
                         await db.flush()
+                        
+                        eventos_ws.append({
+                            "tipo": "caja_asignada",
+                            "accion": "asignar_caja",
+                            "empresa_uuid": str(empresa_uuid),
+                            "caja_id": str(caja_id),
+                            "usuario_id": str(caja.usuario_id),
+                            "version": caja.version,
+                            "sync_cursor": caja.sync_cursor
+                        })
             
             elif item_type == "cerrar_caja":
 
@@ -4370,6 +4370,8 @@ async def sync_batch(
                         ),
                         "version": caja.version
                     })
+                    
+                    print("Evento enviado ")
 
                     await db.flush()
         
