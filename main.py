@@ -5261,16 +5261,12 @@ async def sync_batch(
                     eventos_ws.append({
                         "tipo": "producto_actualizado",
                         "accion": "crear",
-                        "empresa_uuid": str(
-                            empresa_uuid
-                        ),
-                        "producto_id": str(
-                            producto_id
-                        ),
-                        "version": int(
-                            producto.version
-                        )
+                        "empresa_uuid": str(producto.empresa_uuid),
+                        "producto_id": str(producto.id),
+                        "version": producto.version,
+                        "sync_cursor": producto.sync_cursor
                     })
+                        
             
             elif item_type == "actualizar_cliente":
 
