@@ -4252,6 +4252,18 @@ async def sync_batch(
                             created_at=
                                 created_at
                         )
+                        
+                        eventos_ws.append({
+                            "tipo": "caja_actualizada",
+                            "accion": "eliminado",
+                            "empresa_uuid": str(
+                                empresa_uuid
+                            ),
+                            "caja_id": str(
+                                caja_id
+                            ),
+                            "version": caja.version
+                        })
 
                         db.add(caja)
 
@@ -4396,6 +4408,18 @@ async def sync_batch(
                         timezone.utc
                     )
 
+                    eventos_ws.append({
+                        "tipo": "caja_actualizada",
+                        "accion": "eliminado",
+                        "empresa_uuid": str(
+                            empresa_uuid
+                        ),
+                        "caja_id": str(
+                            caja_id
+                        ),
+                        "version": caja.version
+                    })
+                    
                     eventos_ws.append({
                         "tipo": "caja_actualizada",
                         "accion": "eliminado",
