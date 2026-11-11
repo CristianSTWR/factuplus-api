@@ -5199,15 +5199,17 @@ async def sync_batch(
                             0
                         ),
 
-                        margen=payload.get(
-                            "costo",
-                            0
-                        ),
+                        
                         
                         costo=payload.get(
                             "costo",
                             0
                         ),
+                        
+                        margen=payload.get(
+                                                    "margen",
+                                                    0
+                                                ),
 
                         stock=payload.get(
                             "stock",
