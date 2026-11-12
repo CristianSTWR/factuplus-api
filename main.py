@@ -7425,6 +7425,141 @@ async def sync_batch(
                         "sync_cursor": auditoria.sync_cursor
                     })
         
+            elif item_type == "actualizar_conteo_auditoria":
+
+                empresa_uuid = payload.get("empresa_uuid")
+                auditoria_id = UUID(payload["auditoria_id"])
+                detalle_id = UUID(payload["detalle_id"])
+                producto_uuid = UUID(payload["producto_uuid"])
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "El conteo no contiene empresa_uuid"
+                    )
+
+                cantidad_contada = Decimal(
+                    str(payload.get("cantidad_contada"))
+                )
+
+                if not cantidad_contada.is_finite() or cantidad_contada < 0:
+                    raise ValueError(
+                        "La cantidad contada no es válida"
+                    )
+
+                q = await db.execute(
+                    select(AuditoriaInventario)
+                    .where(
+                        AuditoriaInventario.id == auditoria_id,
+                        AuditoriaInventario.empresa_uuid == empresa_uuid
+                    )
+                    .with_for_update()
+                )
+
+                auditoria = q.scalar_one_or_none()
+
+                if not auditoria:
+                    raise ValueError(
+                        "La auditoría no existe en el servidor"
+                    )
+
+                if auditoria.estado != "en_conteo":
+                    raise ValueError(
+                        "La auditoría no está disponible para registrar conteos"
+                    )
+
+                q = await db.execute(
+                    select(AuditoriaInventarioDetalle)
+                    .where(
+                        AuditoriaInventarioDetalle.id == detalle_id,
+                        AuditoriaInventarioDetalle.auditoria_id == auditoria_id,
+                        AuditoriaInventarioDetalle.producto_uuid == producto_uuid,
+                        AuditoriaInventarioDetalle.empresa_uuid == empresa_uuid
+                    )
+                    .with_for_update()
+                )
+
+                detalle = q.scalar_one_or_none()
+
+                if not detalle:
+                    raise ValueError(
+                        "No se encontró el producto dentro de esta auditoría"
+                    )
+
+                version_recibida = int(payload.get("version", 1))
+
+                if version_recibida <= detalle.version:
+                    continue
+
+                detalle.cantidad_contada = cantidad_contada
+
+                detalle.diferencia = (
+                    cantidad_contada - detalle.stock_teorico
+                )
+
+                detalle.valor_diferencia = (
+                    detalle.diferencia * detalle.costo_unitario
+                )
+
+                detalle.estado = "contado"
+
+                detalle.updated_at = (
+                    parse_datetime(payload.get("updated_at"))
+                    or datetime.now(timezone.utc)
+                )
+
+                detalle.version = version_recibida
+                detalle.sync_status = "synced"
+
+                await db.flush()
+
+                q = await db.execute(
+                    select(
+                        func.count(AuditoriaInventarioDetalle.id)
+                    ).where(
+                        AuditoriaInventarioDetalle.auditoria_id == auditoria_id,
+                        AuditoriaInventarioDetalle.empresa_uuid == empresa_uuid,
+                        AuditoriaInventarioDetalle.cantidad_contada.is_not(None)
+                    )
+                )
+
+                productos_contados = q.scalar_one() or 0
+
+                q = await db.execute(
+                    select(
+                        func.count(AuditoriaInventarioDetalle.id)
+                    ).where(
+                        AuditoriaInventarioDetalle.auditoria_id == auditoria_id,
+                        AuditoriaInventarioDetalle.empresa_uuid == empresa_uuid,
+                        AuditoriaInventarioDetalle.cantidad_contada.is_not(None),
+                        AuditoriaInventarioDetalle.diferencia != 0
+                    )
+                )
+
+                productos_con_diferencias = q.scalar_one() or 0
+
+                auditoria.productos_contados = productos_contados
+
+                auditoria.productos_con_diferencias = (
+                    productos_con_diferencias
+                )
+
+                auditoria.version = (
+                    (auditoria.version or 1) + 1
+                )
+
+                auditoria.updated_at = datetime.now(timezone.utc)
+                auditoria.sync_status = "synced"
+
+                await db.flush()
+
+                eventos_ws.append({
+                    "tipo": "auditoria_inventario_actualizada",
+                    "accion": "crear",
+                    "empresa_uuid": str(auditoria.empresa_uuid),
+                    "auditoria_id": str(auditoria.id),
+                    "version": auditoria.version,
+                    "sync_cursor": auditoria.sync_cursor
+                })
                         
             elif item_type == "iniciar_conteo_auditoria":
 
