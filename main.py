@@ -7425,6 +7425,7 @@ async def sync_batch(
                         "sync_cursor": auditoria.sync_cursor
                     })
         
+                        
             elif item_type == "iniciar_conteo_auditoria":
 
                 auditoria_id = UUID(
@@ -7440,11 +7441,26 @@ async def sync_batch(
                         "El inicio de auditoría no contiene empresa_uuid"
                     )
 
+                lote_numero = int(
+                    payload.get("lote_numero", 1)
+                )
+
+                total_lotes = int(
+                    payload.get("total_lotes", 1)
+                )
+
+                total_detalles = int(
+                    payload.get("total_detalles", 0)
+                )
+
+                if lote_numero < 1 or lote_numero > total_lotes:
+                    raise ValueError("Número de lote inválido")
+
                 q = await db.execute(
                     select(AuditoriaInventario).where(
                         AuditoriaInventario.id == auditoria_id,
                         AuditoriaInventario.empresa_uuid == empresa_uuid
-                    )
+                    ).with_for_update()
                 )
 
                 auditoria = q.scalar_one_or_none()
@@ -7454,18 +7470,37 @@ async def sync_batch(
                         "La auditoría no existe en el servidor"
                     )
 
-                if auditoria.estado != "preparacion":
+                if auditoria.estado not in ("preparacion", "en_conteo"):
                     raise ValueError(
-                        "La auditoría ya fue iniciada o no está disponible"
+                        "La auditoría no está disponible para recibir detalles"
                     )
 
                 detalles = payload.get("detalles", [])
+
+                if len(detalles) > 50:
+                    raise ValueError(
+                        "El lote supera el máximo de 50 detalles"
+                    )
 
                 for detalle in detalles:
 
                     detalle_id = UUID(
                         detalle["id"]
                     )
+
+                    producto_uuid = UUID(
+                        detalle["producto_uuid"]
+                    )
+
+                    existente = await db.execute(
+                        select(AuditoriaInventarioDetalle.id).where(
+                            AuditoriaInventarioDetalle.auditoria_id == auditoria_id,
+                            AuditoriaInventarioDetalle.producto_uuid == producto_uuid
+                        )
+                    )
+
+                    if existente.scalar_one_or_none():
+                        continue
 
                     sync_cursor = (
                         await obtener_siguiente_auditorias_inventario_detalles_cursor(
@@ -7481,9 +7516,7 @@ async def sync_batch(
 
                         auditoria_id=auditoria_id,
 
-                        producto_uuid=UUID(
-                            detalle["producto_uuid"]
-                        ),
+                        producto_uuid=producto_uuid,
 
                         stock_teorico=detalle.get(
                             "stock_teorico",
@@ -7549,21 +7582,26 @@ async def sync_batch(
 
                     db.add(nuevo_detalle)
 
-                auditoria.estado = "en_conteo"
+                # Actualizar el estado solamente si todavía está en preparación.
+                # Los siguientes lotes no deben reiniciar la auditoría.
 
-                auditoria.fecha_inicio = parse_datetime(
-                    payload["auditoria"]["fecha_inicio"]
-                )
+                if auditoria.estado == "preparacion":
 
-                auditoria.total_productos = len(detalles)
+                    auditoria.estado = "en_conteo"
 
-                auditoria.productos_contados = 0
+                    auditoria.fecha_inicio = parse_datetime(
+                        payload["auditoria"]["fecha_inicio"]
+                    )
 
-                auditoria.productos_con_diferencias = 0
+                    auditoria.productos_contados = 0
 
-                auditoria.version = int(
-                    payload["auditoria"].get("version", 1)
-                )
+                    auditoria.productos_con_diferencias = 0
+
+                    auditoria.version = int(
+                        payload["auditoria"].get("version", 1)
+                    )
+
+                auditoria.total_productos = total_detalles
 
                 auditoria.sync_status = "synced"
 
@@ -7574,83 +7612,13 @@ async def sync_batch(
                     "accion": "iniciar_conteo",
                     "empresa_uuid": str(auditoria.empresa_uuid),
                     "auditoria_id": str(auditoria.id),
+                    "lote_numero": lote_numero,
+                    "total_lotes": total_lotes,
+                    "total_detalles": total_detalles,
                     "version": auditoria.version,
                     "sync_cursor": auditoria.sync_cursor
                 })
-    
-        
-            elif item_type == "iniciar_conteo_auditoria":
 
-                auditoria_id = UUID(
-                    payload["auditoria_id"]
-                )
-
-                empresa_uuid = payload.get(
-                    "empresa_uuid"
-                )
-
-                if not empresa_uuid:
-                    raise ValueError(
-                        "El inicio de auditoría no contiene empresa_uuid"
-                    )
-
-                q = await db.execute(
-                    select(AuditoriaInventario).where(
-                        AuditoriaInventario.id == auditoria_id,
-                        AuditoriaInventario.empresa_uuid == empresa_uuid
-                    )
-                )
-
-                auditoria = q.scalar_one_or_none()
-
-                if not auditoria:
-                    raise ValueError(
-                        "La auditoría no existe en el servidor"
-                    )
-
-                if auditoria.estado != "preparacion":
-                    raise ValueError(
-                        "La auditoría ya fue iniciada o no está disponible"
-                    )
-
-                detalles = payload.get("detalles", [])
-
-                for detalle in detalles:
-
-                    # Aquí debes insertar cada detalle
-                    # utilizando el modelo AuditoriaInventarioDetalle.
-
-                    pass
-
-                auditoria.estado = "en_conteo"
-
-                auditoria.fecha_inicio = parse_datetime(
-                    payload["auditoria"]["fecha_inicio"]
-                )
-
-                auditoria.total_productos = len(detalles)
-
-                auditoria.productos_contados = 0
-
-                auditoria.productos_con_diferencias = 0
-
-                auditoria.version = int(
-                    payload["auditoria"].get("version", 1)
-                )
-
-                auditoria.sync_status = "synced"
-
-                await db.flush()
-
-                eventos_ws.append({
-                    "tipo": "auditoria_inventario_actualizada",
-                    "accion": "iniciar_conteo",
-                    "empresa_uuid": str(auditoria.empresa_uuid),
-                    "auditoria_id": str(auditoria.id),
-                    "version": auditoria.version,
-                    "sync_cursor": auditoria.sync_cursor
-                })
-            
             """ elif item_type == "create_producto":
 
                 q = await db.execute(
