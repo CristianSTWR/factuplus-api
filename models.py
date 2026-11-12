@@ -3344,6 +3344,11 @@ class AuditoriaInventario(Base):
         default=0,
         server_default=text("0")
     )
+    
+    fecha_programada: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
