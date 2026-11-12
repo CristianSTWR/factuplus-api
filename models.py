@@ -3389,6 +3389,133 @@ class AuditoriaInventario(Base):
         server_default=text("1")
     )
     
+class AuditoriaInventarioDetalle(Base):
+
+    __tablename__ = "auditorias_inventario_detalles"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "auditoria_id",
+            "producto_uuid",
+            name="auditorias_inventario_detalles_auditoria_producto_unique"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        index=True
+    )
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        index=True
+    )
+
+    auditoria_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "auditorias_inventario.id",
+            ondelete="CASCADE"
+        ),
+        nullable=False,
+        index=True
+    )
+
+    producto_uuid: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=False,
+        index=True
+    )
+
+    stock_teorico: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    cantidad_contada: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 4),
+        nullable=True
+    )
+
+    diferencia: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    costo_unitario: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    valor_diferencia: Mapped[Decimal] = mapped_column(
+        Numeric(15, 4),
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    estado: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="pendiente",
+        server_default=text("'pendiente'")
+    )
+
+    requiere_reconteo: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("FALSE")
+    )
+
+    observacion: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="synced",
+        server_default=text("'synced'")
+    )
+
+    sync_cursor: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+        unique=True
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1")
+    )
+
 """ class Gasto(Base):
 
     __tablename__ = "gastos"

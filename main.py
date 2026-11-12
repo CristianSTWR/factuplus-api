@@ -113,7 +113,7 @@ import re
 # APLICACION
 from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, Producto, UnidadMedida, Rol, RolPermiso, UsuarioRol, MetodoPago, Cliente, Suplidor
 from models import Compra, CompraDetalle, VentaDetalle, Pago, HistorialStock, Devolucion, DevolucionDetalle, Cotizacion, CotizacionDetalle, Descuento, DescuentoCliente, DescuentoCondicion, DescuentoDia, DescuentoProducto
-from models import SecuenciaECF, EcfFirmadorTicket, EcfRecepcionIntento, EcfAcuse, EcfRecibido, EcfCertificado, AuditoriaInventario
+from models import SecuenciaECF, EcfFirmadorTicket, EcfRecepcionIntento, EcfAcuse, EcfRecibido, EcfCertificado, AuditoriaInventario, AuditoriaInventarioDetalle
 
 # WEB
 from models import ListaEspera, EmpresaDispositivo
@@ -7425,6 +7425,232 @@ async def sync_batch(
                         "sync_cursor": auditoria.sync_cursor
                     })
         
+            elif item_type == "iniciar_conteo_auditoria":
+
+                auditoria_id = UUID(
+                    payload["auditoria_id"]
+                )
+
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "El inicio de auditoría no contiene empresa_uuid"
+                    )
+
+                q = await db.execute(
+                    select(AuditoriaInventario).where(
+                        AuditoriaInventario.id == auditoria_id,
+                        AuditoriaInventario.empresa_uuid == empresa_uuid
+                    )
+                )
+
+                auditoria = q.scalar_one_or_none()
+
+                if not auditoria:
+                    raise ValueError(
+                        "La auditoría no existe en el servidor"
+                    )
+
+                if auditoria.estado != "preparacion":
+                    raise ValueError(
+                        "La auditoría ya fue iniciada o no está disponible"
+                    )
+
+                detalles = payload.get("detalles", [])
+
+                for detalle in detalles:
+
+                    detalle_id = UUID(
+                        detalle["id"]
+                    )
+
+                    sync_cursor = (
+                        await obtener_siguiente_auditorias_inventario_detalles_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
+
+                    nuevo_detalle = AuditoriaInventarioDetalle(
+                        id=detalle_id,
+
+                        empresa_uuid=empresa_uuid,
+
+                        auditoria_id=auditoria_id,
+
+                        producto_uuid=UUID(
+                            detalle["producto_uuid"]
+                        ),
+
+                        stock_teorico=detalle.get(
+                            "stock_teorico",
+                            0
+                        ),
+
+                        cantidad_contada=detalle.get(
+                            "cantidad_contada"
+                        ),
+
+                        diferencia=detalle.get(
+                            "diferencia",
+                            0
+                        ),
+
+                        costo_unitario=detalle.get(
+                            "costo_unitario",
+                            0
+                        ),
+
+                        valor_diferencia=detalle.get(
+                            "valor_diferencia",
+                            0
+                        ),
+
+                        estado=detalle.get(
+                            "estado",
+                            "pendiente"
+                        ),
+
+                        requiere_reconteo=detalle.get(
+                            "requiere_reconteo",
+                            False
+                        ),
+
+                        observacion=detalle.get(
+                            "observacion"
+                        ),
+
+                        sync_cursor=sync_cursor,
+
+                        version=int(
+                            detalle.get(
+                                "version",
+                                1
+                            )
+                        ),
+
+                        sync_status="synced",
+
+                        created_at=(
+                            parse_datetime(detalle["created_at"])
+                            if detalle.get("created_at")
+                            else None
+                        ),
+
+                        updated_at=(
+                            parse_datetime(detalle["updated_at"])
+                            if detalle.get("updated_at")
+                            else None
+                        )
+                    )
+
+                    db.add(nuevo_detalle)
+
+                auditoria.estado = "en_conteo"
+
+                auditoria.fecha_inicio = parse_datetime(
+                    payload["auditoria"]["fecha_inicio"]
+                )
+
+                auditoria.total_productos = len(detalles)
+
+                auditoria.productos_contados = 0
+
+                auditoria.productos_con_diferencias = 0
+
+                auditoria.version = int(
+                    payload["auditoria"].get("version", 1)
+                )
+
+                auditoria.sync_status = "synced"
+
+                await db.flush()
+
+                eventos_ws.append({
+                    "tipo": "auditoria_inventario_actualizada",
+                    "accion": "iniciar_conteo",
+                    "empresa_uuid": str(auditoria.empresa_uuid),
+                    "auditoria_id": str(auditoria.id),
+                    "version": auditoria.version,
+                    "sync_cursor": auditoria.sync_cursor
+                })
+    
+        
+            elif item_type == "iniciar_conteo_auditoria":
+
+                auditoria_id = UUID(
+                    payload["auditoria_id"]
+                )
+
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "El inicio de auditoría no contiene empresa_uuid"
+                    )
+
+                q = await db.execute(
+                    select(AuditoriaInventario).where(
+                        AuditoriaInventario.id == auditoria_id,
+                        AuditoriaInventario.empresa_uuid == empresa_uuid
+                    )
+                )
+
+                auditoria = q.scalar_one_or_none()
+
+                if not auditoria:
+                    raise ValueError(
+                        "La auditoría no existe en el servidor"
+                    )
+
+                if auditoria.estado != "preparacion":
+                    raise ValueError(
+                        "La auditoría ya fue iniciada o no está disponible"
+                    )
+
+                detalles = payload.get("detalles", [])
+
+                for detalle in detalles:
+
+                    # Aquí debes insertar cada detalle
+                    # utilizando el modelo AuditoriaInventarioDetalle.
+
+                    pass
+
+                auditoria.estado = "en_conteo"
+
+                auditoria.fecha_inicio = parse_datetime(
+                    payload["auditoria"]["fecha_inicio"]
+                )
+
+                auditoria.total_productos = len(detalles)
+
+                auditoria.productos_contados = 0
+
+                auditoria.productos_con_diferencias = 0
+
+                auditoria.version = int(
+                    payload["auditoria"].get("version", 1)
+                )
+
+                auditoria.sync_status = "synced"
+
+                await db.flush()
+
+                eventos_ws.append({
+                    "tipo": "auditoria_inventario_actualizada",
+                    "accion": "iniciar_conteo",
+                    "empresa_uuid": str(auditoria.empresa_uuid),
+                    "auditoria_id": str(auditoria.id),
+                    "version": auditoria.version,
+                    "sync_cursor": auditoria.sync_cursor
+                })
+            
             """ elif item_type == "create_producto":
 
                 q = await db.execute(
@@ -22391,5 +22617,83 @@ async def obtener_siguiente_auditorias_inventario_cursor(
         resultado_final.scalar_one()
     )
     
+    
+
+async def obtener_siguiente_auditorias_inventario_detalles_cursor(
+    db: AsyncSession,
+    empresa_uuid: str
+):
+    await db.execute(
+        text("""
+            INSERT INTO empresa_sync_counters (
+                empresa_uuid,
+                auditorias_inventario_detalles_cursor
+            )
+            VALUES (
+                :empresa_uuid,
+                0
+            )
+            ON CONFLICT (empresa_uuid)
+            DO NOTHING
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    resultado = await db.execute(
+        text("""
+            SELECT auditorias_inventario_detalles_cursor
+            FROM empresa_sync_counters
+            WHERE empresa_uuid = :empresa_uuid
+            FOR UPDATE
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    cursor_actual = int(
+        resultado.scalar_one() or 0
+    )
+
+    resultado_max = await db.execute(
+        text("""
+            SELECT COALESCE(
+                MAX(sync_cursor),
+                0
+            )
+            FROM auditorias_inventario_detalles
+            WHERE empresa_uuid = :empresa_uuid
+        """),
+        {
+            "empresa_uuid": empresa_uuid
+        }
+    )
+
+    max_cursor = int(
+        resultado_max.scalar_one() or 0
+    )
+
+    siguiente_cursor = (
+        max(cursor_actual, max_cursor) + 1
+    )
+
+    resultado_final = await db.execute(
+        text("""
+            UPDATE empresa_sync_counters
+            SET auditorias_inventario_detalles_cursor = :cursor
+            WHERE empresa_uuid = :empresa_uuid
+            RETURNING auditorias_inventario_detalles_cursor
+        """),
+        {
+            "empresa_uuid": empresa_uuid,
+            "cursor": siguiente_cursor
+        }
+    )
+
+    return int(
+        resultado_final.scalar_one()
+    )  
 
 """  """
