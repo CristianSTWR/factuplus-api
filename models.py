@@ -3268,7 +3268,122 @@ class DescuentoDia(Base):
         server_default=text("NOW()")
     )
 
+class AuditoriaInventario(Base):
 
+    __tablename__ = "auditorias_inventario"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        index=True
+    )
+
+    empresa_uuid: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        index=True
+    )
+
+    nombre: Mapped[str] = mapped_column(
+        Text,
+        nullable=False
+    )
+
+    tipo: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="general",
+        server_default=text("'general'")
+    )
+
+    estado: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="preparacion",
+        server_default=text("'preparacion'")
+    )
+
+    fecha_inicio: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    fecha_finalizacion: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    usuario_creador: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=False
+    )
+
+    observaciones: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    total_productos: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    productos_contados: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    productos_con_diferencias: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0")
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("NOW()")
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    sync_status: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="synced",
+        server_default=text("'synced'")
+    )
+
+    sync_cursor: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+        unique=True
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1")
+    )
+    
 """ class Gasto(Base):
 
     __tablename__ = "gastos"

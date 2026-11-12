@@ -113,7 +113,7 @@ import re
 # APLICACION
 from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, Producto, UnidadMedida, Rol, RolPermiso, UsuarioRol, MetodoPago, Cliente, Suplidor
 from models import Compra, CompraDetalle, VentaDetalle, Pago, HistorialStock, Devolucion, DevolucionDetalle, Cotizacion, CotizacionDetalle, Descuento, DescuentoCliente, DescuentoCondicion, DescuentoDia, DescuentoProducto
-from models import SecuenciaECF, EcfFirmadorTicket, EcfRecepcionIntento, EcfAcuse, EcfRecibido, EcfCertificado
+from models import SecuenciaECF, EcfFirmadorTicket, EcfRecepcionIntento, EcfAcuse, EcfRecibido, EcfCertificado, AuditoriaInventario
 
 # WEB
 from models import ListaEspera, EmpresaDispositivo
@@ -7290,6 +7290,141 @@ async def sync_batch(
 
                     await db.flush()
 
+            
+            elif item_type == "crear_auditoria_inventario":
+
+                auditoria_id = UUID(
+                    payload["id"]
+                )
+
+                empresa_uuid = payload.get(
+                    "empresa_uuid"
+                )
+
+                if not empresa_uuid:
+                    raise ValueError(
+                        "La auditoría de inventario no contiene empresa_uuid"
+                    )
+
+                q = await db.execute(
+                    select(AuditoriaInventario).where(
+                        AuditoriaInventario.id == auditoria_id,
+                        AuditoriaInventario.empresa_uuid == empresa_uuid
+                    )
+                )
+
+                auditoria = q.scalar_one_or_none()
+
+                if not auditoria:
+
+                    sync_cursor = (
+                        await obtener_siguiente_auditorias_inventario_cursor(
+                            db,
+                            empresa_uuid
+                        )
+                    )
+
+                    auditoria = AuditoriaInventario(
+                        id=auditoria_id,
+
+                        empresa_uuid=empresa_uuid,
+
+                        sync_cursor=sync_cursor,
+
+                        nombre=payload["nombre"],
+
+                        tipo=payload.get(
+                            "tipo",
+                            "general"
+                        ),
+
+                        estado=payload.get(
+                            "estado",
+                            "preparacion"
+                        ),
+
+                        fecha_programada=(
+                            parse_datetime(payload["fecha_programada"])
+                            if payload.get("fecha_programada")
+                            else None
+                        ),
+
+                        fecha_inicio=(
+                            parse_datetime(payload["fecha_inicio"])
+                            if payload.get("fecha_inicio")
+                            else None
+                        ),
+
+                        fecha_finalizacion=(
+                            parse_datetime(payload["fecha_finalizacion"])
+                            if payload.get("fecha_finalizacion")
+                            else None
+                        ),
+
+                        usuario_creador=UUID(
+                            payload["usuario_creador"]
+                        ),
+
+                        observaciones=payload.get(
+                            "observaciones"
+                        ),
+
+                        total_productos=payload.get(
+                            "total_productos",
+                            0
+                        ),
+
+                        productos_contados=payload.get(
+                            "productos_contados",
+                            0
+                        ),
+
+                        productos_con_diferencias=payload.get(
+                            "productos_con_diferencias",
+                            0
+                        ),
+
+                        version=int(
+                            payload.get(
+                                "version",
+                                1
+                            )
+                        ),
+
+                        sync_status="synced",
+
+                        created_at=(
+                            parse_datetime(payload["created_at"])
+                            if payload.get("created_at")
+                            else None
+                        ),
+
+                        updated_at=(
+                            parse_datetime(payload["updated_at"])
+                            if payload.get("updated_at")
+                            else None
+                        ),
+
+                        deleted_at=(
+                            parse_datetime(payload["deleted_at"])
+                            if payload.get("deleted_at")
+                            else None
+                        )
+                    )
+
+                    db.add(auditoria)
+
+                    await db.flush()
+
+                    eventos_ws.append({
+                        "tipo": "auditoria_inventario_actualizada",
+                        "accion": "crear",
+                        "empresa_uuid": str(auditoria.empresa_uuid),
+                        "auditoria_id": str(auditoria.id),
+                        "version": auditoria.version,
+                        "sync_cursor": auditoria.sync_cursor
+                    })
+        
             """ elif item_type == "create_producto":
 
                 q = await db.execute(
