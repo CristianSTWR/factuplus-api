@@ -3350,16 +3350,16 @@ async def sync_batch(
                         )
                         db.add(pago)
                         
-                        eventos_ws.append({
-                            "tipo": "venta_actualizada",
-                            "accion": "crear_venta" if not exists else "actualizar",
-                            "empresa_uuid": str(empresa_uuid),
-                            "venta_id": str(venta_id),
-                            "version": venta.version if not exists else exists.version,
-                            "sync_cursor": venta.sync_cursor if not exists else exists.sync_cursor
-                        })
-                        
-                        print("Evento enviado")
+                    eventos_ws.append({
+                        "tipo": "venta_actualizada",
+                        "accion": "crear_venta" if not exists else "actualizar",
+                        "empresa_uuid": str(empresa_uuid),
+                        "venta_id": str(venta_id),
+                        "version": venta.version if not exists else exists.version,
+                        "sync_cursor": venta.sync_cursor if not exists else exists.sync_cursor
+                    })
+                    
+                    print("Evento enviado")
             
             elif item_type == "movimiento_stock":
 
