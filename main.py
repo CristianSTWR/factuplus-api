@@ -3358,6 +3358,8 @@ async def sync_batch(
                             "version": venta.version if not exists else exists.version,
                             "sync_cursor": venta.sync_cursor if not exists else exists.sync_cursor
                         })
+                        
+                        print("Evento enviado")
             
             elif item_type == "movimiento_stock":
 
