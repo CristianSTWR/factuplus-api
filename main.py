@@ -5933,7 +5933,56 @@ async def sync_batch(
                                 compra_detalle
                             )
 
-                            await db.flush()     
+                            await db.flush() 
+                            
+                        producto_id = UUID(detalle["producto_id"])
+
+                        q_producto = await db.execute(
+                            select(Producto).where(
+                                Producto.id == producto_id,
+                                Producto.empresa_uuid == empresa_uuid
+                            )
+                        )
+
+                        producto = q_producto.scalar_one_or_none()
+
+                        if producto:
+                            sync_cursor = await obtener_siguiente_productos_cursor(
+                                db,
+                                empresa_uuid
+                            )
+
+                            producto.costo = detalle.get(
+                                "costo_unitario",
+                                producto.costo
+                            )
+
+                            producto.precio = detalle.get(
+                                "precio_venta",
+                                producto.precio
+                            )
+
+                            producto.margen = detalle.get(
+                                "margen",
+                                producto.margen
+                            )
+
+                            producto.version = (producto.version or 1) + 1
+                            producto.sync_cursor = sync_cursor
+                            producto.sync_status = "synced"
+                            producto.updated_at = datetime.now(timezone.utc)
+
+                            eventos_ws.append({
+                                "tipo": "producto_actualizado",
+                                "accion": "actualizado",
+                                "empresa_uuid": str(empresa_uuid),
+                                "producto_id": str(producto_id),
+                                "version": producto.version
+                            }) 
+                            
+                await db.commit()   
+                if compra:
+                    await db.refresh(compra)
                  
             
             elif item_type == "pago_actualizar":
