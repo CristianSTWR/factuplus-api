@@ -5607,9 +5607,9 @@ async def sync_batch(
                     eventos_ws.append({
                         "tipo": "producto_actualizado",
                         "accion": "eliminar_producto",
-                        "empresa_uuid": str(empresa_uuid),
+                        "empresa_uuid": str(payload["empresa_uuid"]),
                         "producto_id": str(producto.id),
-                        "sync_cursor": producto.sync_cursor
+                        "version": producto.version
                     })
 
                     await db.flush()
