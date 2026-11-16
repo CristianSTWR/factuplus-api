@@ -5575,6 +5575,37 @@ async def sync_batch(
 
                     await db.flush()
         
+            elif item_type == "eliminar_producto":
+
+                producto_id = payload["id"]
+
+                q = await db.execute(
+                    select(Producto).where(
+                        Producto.id == producto_id,
+                        Producto.empresa_uuid == payload["empresa_uuid"]
+                    )
+                )
+
+                producto = q.scalar_one_or_none()
+
+                if producto:
+
+                    siguiente_cursor = await obtener_siguiente_productos_cursor(
+                        db,
+                        payload["empresa_uuid"]
+                    )
+
+                    ahora = datetime.now(timezone.utc)
+
+                    producto.deleted_at = ahora
+                    producto.activo = False
+                    producto.sync_status = "synced"
+                    producto.version += 1
+                    producto.sync_cursor = siguiente_cursor
+                    producto.updated_at = ahora
+
+                    await db.flush()
+            
             elif item_type == "crear_suplidor":
 
                 suplidor_id = UUID(
