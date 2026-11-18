@@ -11541,6 +11541,130 @@ async def descuento_clientes_changes(
         "has_more": len(relaciones) == limite
     }
 
+
+@app.get("/sync/auditorias-inventario/changes")
+async def auditorias_inventario_changes(
+    empresa_uuid: str,
+    cursor: int | None = None,
+    limit: int = 5000,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    token = authorization.replace("Bearer ", "")
+
+    usuario_actual = await verificar_token(token, db)
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(AuditoriaInventario).where(
+        AuditoriaInventario.empresa_uuid == empresa_uuid
+    )
+
+    if cursor is not None:
+        query = query.where(
+            AuditoriaInventario.sync_cursor > cursor
+        )
+
+    query = query.order_by(
+        AuditoriaInventario.sync_cursor.asc()
+    ).limit(limit)
+
+    result = await db.execute(query)
+
+    auditorias = result.scalars().all()
+
+    print(
+        "SYNC AUDITORIAS INVENTARIO:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "cursor_recibido": cursor,
+            "cantidad": len(auditorias),
+            "primer_cursor": (
+                auditorias[0].sync_cursor
+                if auditorias
+                else None
+            ),
+            "ultimo_cursor": (
+                auditorias[-1].sync_cursor
+                if auditorias
+                else None
+            )
+        }
+    )
+
+    return {
+        "items": [
+            {
+                "id": str(a.id),
+
+                "empresa_uuid": a.empresa_uuid,
+
+                "nombre": a.nombre,
+                "tipo": a.tipo,
+                "estado": a.estado,
+
+                "fecha_inicio": (
+                    a.fecha_inicio.isoformat()
+                    if a.fecha_inicio
+                    else None
+                ),
+
+                "fecha_finalizacion": (
+                    a.fecha_finalizacion.isoformat()
+                    if a.fecha_finalizacion
+                    else None
+                ),
+
+                "fecha_programada": (
+                    a.fecha_programada.isoformat()
+                    if a.fecha_programada
+                    else None
+                ),
+
+                "usuario_creador": str(
+                    a.usuario_creador
+                ),
+
+                "observaciones": a.observaciones,
+
+                "total_productos": a.total_productos,
+                "productos_contados": a.productos_contados,
+                "productos_con_diferencias": a.productos_con_diferencias,
+
+                "sync_status": a.sync_status,
+                "version": a.version,
+                "sync_cursor": a.sync_cursor,
+
+                "created_at": (
+                    a.created_at.isoformat()
+                    if a.created_at
+                    else None
+                ),
+
+                "updated_at": (
+                    a.updated_at.isoformat()
+                    if a.updated_at
+                    else None
+                ),
+
+                "deleted_at": (
+                    a.deleted_at.isoformat()
+                    if a.deleted_at
+                    else None
+                )
+            }
+            for a in auditorias
+        ],
+
+        "has_more": len(auditorias) == limit
+    }
+
+ 
+
 """ @app.post("/registrar-users")
 async def register_user(
     payload: dict,
