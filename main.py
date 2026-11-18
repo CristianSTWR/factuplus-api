@@ -2929,23 +2929,6 @@ async def sync_batch(
                             if payload.get("fecha")
                             else None
                         ),
-                        
-                        created_at=(
-                            parse_datetime(
-                                payload["created_at"]
-                            )
-                            if payload.get("created_at")
-                            else None
-                        ),
-                        updated_at=(
-                            parse_datetime(
-                                payload["updated_at"]
-                            )
-                            if payload.get("updated_at")
-                            else None
-                        ),
-                     
-                        
 
                         fecha_vencimiento=(
                             parse_datetime(
