@@ -7586,10 +7586,12 @@ async def sync_batch(
                         "No se encontró el producto dentro de esta auditoría"
                     )
 
-                version_recibida = int(payload.get("version", 1))
-
-                if version_recibida <= detalle.version:
-                    continue
+                sync_cursor = (
+                    await obtener_siguiente_auditorias_inventario_detalles_cursor(
+                        db,
+                        empresa_uuid
+                    )
+                )
 
                 detalle.cantidad_contada = cantidad_contada
 
@@ -7608,7 +7610,8 @@ async def sync_batch(
                     or datetime.now(timezone.utc)
                 )
 
-                detalle.version = version_recibida
+                detalle.version = int(payload.get("version", 1))
+                detalle.sync_cursor = sync_cursor
                 detalle.sync_status = "synced"
 
                 await db.flush()
@@ -7660,8 +7663,8 @@ async def sync_batch(
                     "auditoria_id": str(auditoria.id),
                     "version": auditoria.version,
                     "sync_cursor": auditoria.sync_cursor
-                })
-                        
+                })  
+                      
             elif item_type == "iniciar_conteo_auditoria":
 
                 auditoria_id = UUID(
