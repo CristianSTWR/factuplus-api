@@ -11663,7 +11663,116 @@ async def auditorias_inventario_changes(
         "has_more": len(auditorias) == limit
     }
 
- 
+@app.get("/sync/auditorias-inventario-detalles/changes")
+async def auditorias_inventario_detalles_changes(
+    empresa_uuid: str,
+    auditoria_id: UUID | None = None,
+    cursor: int | None = None,
+    limit: int = 5000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    token = authorization.replace("Bearer ", "")
+
+    usuario_actual = await verificar_token(token, db)
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    query = select(AuditoriaInventarioDetalle).where(
+        AuditoriaInventarioDetalle.empresa_uuid == empresa_uuid
+    )
+
+    if auditoria_id is not None:
+        query = query.where(
+            AuditoriaInventarioDetalle.auditoria_id == auditoria_id
+        )
+
+    if cursor is not None:
+        query = query.where(
+            AuditoriaInventarioDetalle.sync_cursor > cursor
+        )
+        
+    
+
+    query = query.order_by(
+        AuditoriaInventarioDetalle.sync_cursor.asc()
+    ).offset(offset).limit(limit)
+
+    result = await db.execute(query)
+
+    detalles = result.scalars().all()
+
+    print(
+        "SYNC DETALLES AUDITORIA INVENTARIO:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "auditoria_id": str(auditoria_id) if auditoria_id else None,
+            "cursor_recibido": cursor,
+            "cantidad": len(detalles),
+            "primer_cursor": (
+                detalles[0].sync_cursor
+                if detalles
+                else None
+            ),
+            "ultimo_cursor": (
+                detalles[-1].sync_cursor
+                if detalles
+                else None
+            )
+        }
+    )
+
+    return {
+        "items": [
+            {
+                "id": str(d.id),
+
+                "empresa_uuid": d.empresa_uuid,
+
+                "auditoria_id": str(d.auditoria_id),
+                "producto_uuid": str(d.producto_uuid),
+
+                "stock_teorico": float(d.stock_teorico or 0),
+                "cantidad_contada": (
+                    float(d.cantidad_contada)
+                    if d.cantidad_contada is not None
+                    else None
+                ),
+
+                "diferencia": float(d.diferencia or 0),
+                "costo_unitario": float(d.costo_unitario or 0),
+                "valor_diferencia": float(d.valor_diferencia or 0),
+
+                "estado": d.estado,
+                "requiere_reconteo": d.requiere_reconteo,
+                "observacion": d.observacion,
+
+                "sync_status": d.sync_status,
+                "version": d.version,
+                "sync_cursor": d.sync_cursor,
+
+                "created_at": (
+                    d.created_at.isoformat()
+                    if d.created_at
+                    else None
+                ),
+
+                "updated_at": (
+                    d.updated_at.isoformat()
+                    if d.updated_at
+                    else None
+                )
+            }
+            for d in detalles
+        ],
+
+        "has_more": len(detalles) == limit
+    } 
 
 """ @app.post("/registrar-users")
 async def register_user(
