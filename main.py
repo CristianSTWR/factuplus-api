@@ -2840,6 +2840,15 @@ async def sync_batch(
                 )
 
                 exists = q.scalar_one_or_none()
+                
+                print("FECHAS RECIBIDAS EN SERVIDOR:", {
+                    "fecha_raw": payload.get("fecha"),
+                    "created_at_raw": payload.get("created_at"),
+                    "updated_at_raw": payload.get("updated_at"),
+                    "fecha_parseada": parse_datetime(payload.get("fecha")),
+                    "created_at_parseada": parse_datetime(payload.get("created_at")),
+                    "updated_at_parseada": parse_datetime(payload.get("updated_at")),
+                })
 
                 if not exists:
 
