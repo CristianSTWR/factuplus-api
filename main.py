@@ -16987,6 +16987,217 @@ async def restore_descuento_clientes_changes(
         "has_more": len(relaciones) == limit
     }
 
+
+@app.get("/restore/auditorias-inventario/changes")
+async def restore_auditorias_inventario_changes(
+    empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(AuditoriaInventario)
+        .where(
+            AuditoriaInventario.empresa_uuid == empresa_uuid
+        )
+        .order_by(
+            AuditoriaInventario.sync_cursor.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    auditorias = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(a.id),
+
+                "empresa_uuid": a.empresa_uuid,
+
+                "nombre": a.nombre,
+                "tipo": a.tipo,
+                "estado": a.estado,
+
+                "fecha_inicio": (
+                    a.fecha_inicio.isoformat()
+                    if a.fecha_inicio
+                    else None
+                ),
+
+                "fecha_finalizacion": (
+                    a.fecha_finalizacion.isoformat()
+                    if a.fecha_finalizacion
+                    else None
+                ),
+
+                "fecha_programada": (
+                    a.fecha_programada.isoformat()
+                    if a.fecha_programada
+                    else None
+                ),
+
+                "usuario_creador": (
+                    str(a.usuario_creador)
+                    if a.usuario_creador
+                    else None
+                ),
+
+                "observaciones": a.observaciones,
+
+                "total_productos": a.total_productos,
+                "productos_contados": a.productos_contados,
+                "productos_con_diferencias": a.productos_con_diferencias,
+
+                "sync_status": a.sync_status,
+                "version": a.version,
+                "sync_cursor": a.sync_cursor,
+
+                "created_at": (
+                    a.created_at.isoformat()
+                    if a.created_at
+                    else None
+                ),
+
+                "updated_at": (
+                    a.updated_at.isoformat()
+                    if a.updated_at
+                    else None
+                ),
+
+                "deleted_at": (
+                    a.deleted_at.isoformat()
+                    if a.deleted_at
+                    else None
+                )
+            }
+            for a in auditorias
+        ],
+
+        "has_more": len(auditorias) == limit
+    }
+    
+@app.get("/restore/auditorias-inventario-detalles/changes")
+async def restore_auditorias_inventario_detalles_changes(
+    empresa_uuid: str,
+    limit: int = 1000,
+    offset: int = 0,
+    auditoria_id: UUID | None = None,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token requerido"
+        )
+
+    token_tmp = authorization.replace(
+        "Bearer ",
+        ""
+    ).strip()
+
+    await verificar_token_restore(
+        token_tmp,
+        empresa_uuid
+    )
+
+    query = (
+        select(AuditoriaInventarioDetalle)
+        .where(
+            AuditoriaInventarioDetalle.empresa_uuid == empresa_uuid
+        )
+    )
+
+    if auditoria_id is not None:
+        query = query.where(
+            AuditoriaInventarioDetalle.auditoria_id == auditoria_id
+        )
+
+    query = (
+        query
+        .order_by(
+            AuditoriaInventarioDetalle.sync_cursor.desc()
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+
+    detalles = result.scalars().all()
+
+    return {
+        "items": [
+            {
+                "id": str(d.id),
+
+                "empresa_uuid": d.empresa_uuid,
+
+                "auditoria_id": str(d.auditoria_id),
+                "producto_uuid": str(d.producto_uuid),
+
+                "stock_teorico": float(d.stock_teorico or 0),
+
+                "cantidad_contada": (
+                    float(d.cantidad_contada)
+                    if d.cantidad_contada is not None
+                    else None
+                ),
+
+                "diferencia": float(d.diferencia or 0),
+                "costo_unitario": float(d.costo_unitario or 0),
+                "valor_diferencia": float(d.valor_diferencia or 0),
+
+                "estado": d.estado,
+                "requiere_reconteo": d.requiere_reconteo,
+                "observacion": d.observacion,
+
+                "sync_status": d.sync_status,
+                "version": d.version,
+                "sync_cursor": d.sync_cursor,
+
+                "created_at": (
+                    d.created_at.isoformat()
+                    if d.created_at
+                    else None
+                ),
+
+                "updated_at": (
+                    d.updated_at.isoformat()
+                    if d.updated_at
+                    else None
+                )
+            }
+            for d in detalles
+        ],
+
+        "has_more": len(detalles) == limit
+    }  
+    
+
 from pydantic import BaseModel
 
 class TokenTmpRequest(BaseModel):
