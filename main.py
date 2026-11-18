@@ -2929,6 +2929,18 @@ async def sync_batch(
                             if payload.get("fecha")
                             else None
                         ),
+                        
+                        created_at=(
+                            parse_datetime(payload["created_at"])
+                            if payload.get("created_at")
+                            else datetime.now(timezone.utc)
+                        ),
+
+                        updated_at=(
+                            parse_datetime(payload["updated_at"])
+                            if payload.get("updated_at")
+                            else datetime.now(timezone.utc)
+                        ),
 
                         fecha_vencimiento=(
                             parse_datetime(
@@ -7661,9 +7673,10 @@ async def sync_batch(
                     "accion": "crear",
                     "empresa_uuid": str(auditoria.empresa_uuid),
                     "auditoria_id": str(auditoria.id),
-                    "version": auditoria.version,
-                    "sync_cursor": auditoria.sync_cursor
-                })  
+                    "detalle_id": str(detalle.id),
+                    "version": detalle.version,
+                    "sync_cursor": detalle.sync_cursor
+                }) 
                       
             elif item_type == "iniciar_conteo_auditoria":
 
