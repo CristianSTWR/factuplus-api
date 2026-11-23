@@ -120,7 +120,6 @@ from models import ListaEspera, EmpresaDispositivo
 
 from db import get_db
 
-load_dotenv()
 validate_settings()
 
 # loggings
@@ -8521,7 +8520,9 @@ async def caja_movimientos_changes(
             len(movimientos) == limit
     }
     
-    
+
+
+
 @app.get("/sync/productos/changes")
 async def productos_changes(
     empresa_uuid: str,
@@ -8546,7 +8547,25 @@ async def productos_changes(
             detail="Acceso denegado"
         )
 
-    query = select(Producto).where(
+    stock_snapshot_cursor = (
+        select(
+            func.max(HistorialStock.sync_cursor)
+        )
+        .where(
+            HistorialStock.empresa_uuid == Producto.empresa_uuid,
+            HistorialStock.producto_id == Producto.id
+        )
+        .correlate(Producto)
+        .scalar_subquery()
+    )
+
+    query = select(
+        Producto,
+        func.coalesce(
+            stock_snapshot_cursor,
+            0
+        ).label("stock_snapshot_cursor")
+    ).where(
         Producto.empresa_uuid == empresa_uuid
     )
 
@@ -8567,7 +8586,15 @@ async def productos_changes(
         query
     )
 
-    productos = result.scalars().all()
+    filas = result.all()
+
+    productos = [
+        (
+            fila[0],
+            int(fila[1] or 0)
+        )
+        for fila in filas
+    ]
 
     print(
         "SYNC PRODUCTOS:",
@@ -8576,12 +8603,12 @@ async def productos_changes(
             "cursor_recibido": cursor,
             "cantidad": len(productos),
             "primer_cursor": (
-                productos[0].sync_cursor
+                productos[0][0].sync_cursor
                 if productos
                 else None
             ),
             "ultimo_cursor": (
-                productos[-1].sync_cursor
+                productos[-1][0].sync_cursor
                 if productos
                 else None
             )
@@ -8602,6 +8629,9 @@ async def productos_changes(
                 "costo": float(p.costo or 0),
                 "margen": float(p.margen or 0),
                 "stock": float(p.stock or 0),
+
+                "stock_snapshot_cursor": snapshot_cursor,
+
                 "stock_minimo": float(p.stock_minimo or 0),
                 "itbis": float(p.itbis or 0),
                 "unidad_id": (
@@ -8633,29 +8663,44 @@ async def productos_changes(
                     else None
                 )
             }
-            for p in productos
+            for p, snapshot_cursor in productos
         ],
         "has_more":
             len(productos) == limit
-    }  
+    }
+ 
+
 
 @app.get("/sync/historial-stock/changes")
 async def historial_stock_changes(
     empresa_uuid: str,
     cursor: int | None = None,
     movimiento_id: str | None = None,
+    offset: int = 0,
     limit: int = 5000,
     authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
 ):
+    if not authorization:
+        raise HTTPException(
+            status_code=401,
+            detail="Token de autenticación requerido"
+        )
 
-    token = authorization.replace(
-        "Bearer ",
-        ""
-    )
+    esquema, separador, token = authorization.partition(" ")
+
+    if (
+        not separador
+        or esquema.lower() != "bearer"
+        or not token.strip()
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Token de autenticación inválido"
+        )
 
     usuario_actual = await verificar_token(
-        token,
+        token.strip(),
         db
     )
 
@@ -8665,6 +8710,24 @@ async def historial_stock_changes(
             detail="Acceso denegado"
         )
 
+    if limit < 1 or limit > 5000:
+        raise HTTPException(
+            status_code=422,
+            detail="El límite debe estar entre 1 y 5000"
+        )
+
+    if offset < 0:
+        raise HTTPException(
+            status_code=422,
+            detail="El offset no puede ser negativo"
+        )
+
+    if cursor is not None and cursor < 0:
+        raise HTTPException(
+            status_code=422,
+            detail="El cursor no puede ser negativo"
+        )
+
     query = select(
         HistorialStock
     ).where(
@@ -8672,31 +8735,34 @@ async def historial_stock_changes(
     )
 
     if movimiento_id:
-
         query = query.where(
-            HistorialStock.movimiento_id ==
-            movimiento_id
+            HistorialStock.movimiento_id == movimiento_id
         )
 
     elif cursor is not None:
-
         query = query.where(
             HistorialStock.sync_cursor > cursor
         )
 
+    else:
+        query = query.offset(offset)
+
     query = query.order_by(
-        HistorialStock.sync_cursor.asc()
+        HistorialStock.sync_cursor.asc(),
+        HistorialStock.movimiento_id.asc()
     )
 
-    query = query.limit(
-        limit
-    )
+    # Traemos un registro adicional para saber
+    # con certeza si existe otra página.
+    query = query.limit(limit + 1)
 
-    result = await db.execute(
-        query
-    )
+    result = await db.execute(query)
 
-    movimientos = result.scalars().all()
+    filas = result.scalars().all()
+
+    has_more = len(filas) > limit
+
+    movimientos = filas[:limit]
 
     print(
         "SYNC HISTORIAL STOCK:",
@@ -8704,7 +8770,9 @@ async def historial_stock_changes(
             "empresa_uuid": empresa_uuid,
             "cursor_recibido": cursor,
             "movimiento_id": movimiento_id,
+            "offset": offset,
             "cantidad": len(movimientos),
+            "has_more": has_more,
             "primer_cursor": (
                 movimientos[0].sync_cursor
                 if movimientos
@@ -8769,8 +8837,7 @@ async def historial_stock_changes(
             for m in movimientos
         ],
 
-        "has_more":
-            len(movimientos) == limit
+        "has_more": has_more
     }
 
 @app.get("/sync/ventas/changes")
@@ -17901,6 +17968,115 @@ async def consultar_secuencias_ecf(
             status_code=500,
             detail="Error consultando las secuencias e-CF"
         )
+
+
+@app.get("/sync/productos/stock-snapshots")
+async def productos_stock_snapshots(
+    empresa_uuid: str,
+    after_id: UUID | None = None,
+    limit: int = 1000,
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Token de autenticación requerido"
+        )
+
+    token = authorization.replace("Bearer ", "", 1).strip()
+
+    usuario_actual = await verificar_token(
+        token,
+        db
+    )
+
+    if usuario_actual.empresa_uuid != empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado"
+        )
+
+    if limit < 1 or limit > 5000:
+        raise HTTPException(
+            status_code=400,
+            detail="El límite debe estar entre 1 y 5000"
+        )
+
+    stock_snapshot_cursor = (
+        select(
+            func.max(HistorialStock.sync_cursor)
+        )
+        .where(
+            HistorialStock.empresa_uuid == Producto.empresa_uuid,
+            HistorialStock.producto_id == Producto.id
+        )
+        .correlate(Producto)
+        .scalar_subquery()
+    )
+
+    query = select(
+        Producto,
+        func.coalesce(
+            stock_snapshot_cursor,
+            0
+        ).label("stock_snapshot_cursor")
+    ).where(
+        Producto.empresa_uuid == empresa_uuid
+    )
+
+    if after_id is not None:
+        query = query.where(
+            Producto.id > after_id
+        )
+
+    query = query.order_by(
+        Producto.id.asc()
+    ).limit(
+        limit + 1
+    )
+
+    result = await db.execute(query)
+
+    filas = result.all()
+
+    has_more = len(filas) > limit
+
+    filas = filas[:limit]
+
+    items = [
+        {
+            "id": str(producto.id),
+            "empresa_uuid": producto.empresa_uuid,
+            "stock": float(producto.stock or 0),
+            "stock_snapshot_cursor": int(
+                snapshot_cursor or 0
+            )
+        }
+        for producto, snapshot_cursor in filas
+    ]
+
+    next_after_id = (
+        items[-1]["id"]
+        if has_more and items
+        else None
+    )
+
+    print(
+        "PRODUCTOS STOCK SNAPSHOTS:",
+        {
+            "empresa_uuid": empresa_uuid,
+            "after_id": str(after_id) if after_id else None,
+            "cantidad": len(items),
+            "has_more": has_more
+        }
+    )
+
+    return {
+        "items": items,
+        "has_more": has_more,
+        "next_after_id": next_after_id
+    }
 
 @app.post("/asignar-ecf")
 async def asignar_ecf(
