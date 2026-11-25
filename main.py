@@ -2181,6 +2181,7 @@ async def sync_batch(
         }
         
         eventos_ws = []
+        resultados_stock = []
 
         requiere_usuario = any(
             item.get("type") not in tipos_inicializacion
@@ -3403,15 +3404,29 @@ async def sync_batch(
 
                 movimiento_existente = await db.execute(
                     select(HistorialStock).where(
-                        HistorialStock.movimiento_id == movimiento_id
+                        HistorialStock.movimiento_id == movimiento_id,
+                        HistorialStock.empresa_uuid == empresa_uuid
                     )
                 )
 
-                if movimiento_existente.scalar_one_or_none():
+                historial_existente = movimiento_existente.scalar_one_or_none()
+
+                if historial_existente:
+                    resultados_stock.append({
+                        "id": item.get("id"),
+                        "type": item_type,
+                        "success": True,
+                        "movement_id": str(movimiento_id),
+                        "sync_cursor": historial_existente.sync_cursor
+                    })
+
                     print(
                         "MOVIMIENTO STOCK YA PROCESADO:",
-                        movimiento_id
+                        movimiento_id,
+                        "CURSOR:",
+                        historial_existente.sync_cursor
                     )
+
                     continue
 
                 resultado_cursor = await db.execute(
@@ -3472,6 +3487,14 @@ async def sync_batch(
                 db.add(historial)
 
                 await db.flush()
+                
+                resultados_stock.append({
+                    "id": item.get("id"),
+                    "type": item_type,
+                    "success": True,
+                    "movement_id": str(movimiento_id),
+                    "sync_cursor": sync_cursor
+                })
 
                 eventos_ws.append({
                     "tipo": "producto_actualizado",
@@ -3561,6 +3584,7 @@ async def sync_batch(
                 )
       
       
+            
             elif item_type == "producto_sumarstock":
                 producto_id = UUID(payload["producto_id"])
                 empresa_uuid = str(payload["empresa_uuid"])
@@ -3594,15 +3618,35 @@ async def sync_batch(
 
                 movimiento_existente = await db.execute(
                     select(HistorialStock).where(
-                        HistorialStock.movimiento_id == movimiento_id
+                        HistorialStock.movimiento_id == movimiento_id,
+                        HistorialStock.empresa_uuid == empresa_uuid
                     )
                 )
 
-                if movimiento_existente.scalar_one_or_none():
+                historial_existente = movimiento_existente.scalar_one_or_none()
+
+                if historial_existente:
+                    if historial_existente.sync_cursor is None:
+                        raise ValueError(
+                            f"El movimiento {movimiento_id} ya existe, "
+                            "pero no tiene sync_cursor asignado"
+                        )
+
+                    resultados_stock.append({
+                        "id": item.get("id"),
+                        "type": item_type,
+                        "success": True,
+                        "movement_id": str(movimiento_id),
+                        "sync_cursor": historial_existente.sync_cursor
+                    })
+
                     print(
                         "PRODUCTO SUMAR STOCK YA PROCESADO:",
-                        movimiento_id
+                        movimiento_id,
+                        "CURSOR:",
+                        historial_existente.sync_cursor
                     )
+
                     continue
 
                 resultado_cursor = await db.execute(
@@ -3664,6 +3708,14 @@ async def sync_batch(
                 db.add(historial)
 
                 await db.flush()
+
+                resultados_stock.append({
+                    "id": item.get("id"),
+                    "type": item_type,
+                    "success": True,
+                    "movement_id": str(movimiento_id),
+                    "sync_cursor": sync_cursor
+                })
 
                 eventos_ws.append({
                     "tipo": "producto_actualizado",
@@ -3759,7 +3811,8 @@ async def sync_batch(
                         "sync_cursor": sync_cursor
                     }
                 )
-            
+
+
             elif item_type == "producto_reducirstock":
                 producto_id = UUID(payload["producto_id"])
                 empresa_uuid = str(payload["empresa_uuid"])
@@ -3793,15 +3846,35 @@ async def sync_batch(
 
                 movimiento_existente = await db.execute(
                     select(HistorialStock).where(
-                        HistorialStock.movimiento_id == movimiento_id
+                        HistorialStock.movimiento_id == movimiento_id,
+                        HistorialStock.empresa_uuid == empresa_uuid
                     )
                 )
 
-                if movimiento_existente.scalar_one_or_none():
+                historial_existente = movimiento_existente.scalar_one_or_none()
+
+                if historial_existente:
+                    if historial_existente.sync_cursor is None:
+                        raise ValueError(
+                            f"El movimiento {movimiento_id} ya existe, "
+                            "pero no tiene sync_cursor asignado"
+                        )
+
+                    resultados_stock.append({
+                        "id": item.get("id"),
+                        "type": item_type,
+                        "success": True,
+                        "movement_id": str(movimiento_id),
+                        "sync_cursor": historial_existente.sync_cursor
+                    })
+
                     print(
                         "PRODUCTO REDUCIR STOCK YA PROCESADO:",
-                        movimiento_id
+                        movimiento_id,
+                        "CURSOR:",
+                        historial_existente.sync_cursor
                     )
+
                     continue
 
                 resultado_cursor = await db.execute(
@@ -3872,6 +3945,14 @@ async def sync_batch(
                 db.add(historial)
 
                 await db.flush()
+                
+                resultados_stock.append({
+                    "id": item.get("id"),
+                    "type": item_type,
+                    "success": True,
+                    "movement_id": str(movimiento_id),
+                    "sync_cursor": sync_cursor
+                })
 
                 eventos_ws.append({
                     "tipo": "producto_actualizado",
@@ -7901,7 +7982,8 @@ async def sync_batch(
             )
 
         return {
-            "ok": True
+            "ok": True,
+            "results_stock": resultados_stock
         }
 
     except Exception as e:
