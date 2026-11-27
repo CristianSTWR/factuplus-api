@@ -139,12 +139,18 @@ app.add_middleware(SecurityHeadersMiddleware, is_prod=IS_PROD)
 # CORS (set ALLOWED_ORIGINS in env). If empty, do not enable permissive CORS.
 if ALLOWED_ORIGINS:
     app.add_middleware(
-        CORSMiddleware,
-        allow_origins=ALLOWED_ORIGINS,
-        allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Internal-Key", "X-Request-Id"],
-    )
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-Internal-Key",
+        "X-Request-Id",
+        "X-CSRF-Token"
+    ],
+)
 
 # Allowed hosts (recommended in prod). If empty, allow all.
 if ALLOWED_HOSTS:
@@ -23615,4 +23621,171 @@ async def obtener_siguiente_auditorias_inventario_detalles_cursor(
         resultado_final.scalar_one()
     )  
 
-"""  """
+""" PAGINA WEB """
+
+class LoginRequest(BaseModel):
+    correo: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+@app.post("/auth/login")
+async def auth_login(
+    payload: LoginRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db)
+):
+    _rate_limit(request, limiter_sensitive)
+
+    correo = payload.correo.strip().lower()
+
+    result = await db.execute(
+        select(User).where(
+            func.lower(User.correo) == correo,
+            User.activo.is_(True),
+            User.deleted_at.is_(None)
+        )
+    )
+
+    usuarios = result.scalars().all()
+
+    if not usuarios:
+        raise HTTPException(
+            status_code=401,
+            detail="Correo o contraseña incorrectos"
+        )
+
+    if len(usuarios) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail="Este correo está asociado a varias cuentas"
+        )
+
+    user = usuarios[0]
+
+    if not pwd_context.verify(
+        payload.password,
+        user.password_hash
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Correo o contraseña incorrectos"
+        )
+
+    ahora = datetime.now(timezone.utc)
+
+    token = jwt.encode(
+        {
+            "user_id": str(user.id),
+            "empresa_uuid": user.empresa_uuid,
+            "usuario": user.usuario,
+            "typ": "access",
+            "iat": ahora,
+            "exp": ahora + timedelta(minutes=15)
+        },
+        JWT_SECRET,
+        algorithm=JWT_ALGORITHM
+    )
+
+    cookie_name = (
+        "__Host-fp_access"
+        if IS_PROD
+        else "fp_access"
+    )
+
+    response.set_cookie(
+        key=cookie_name,
+        value=token,
+        httponly=True,
+        secure=IS_PROD,
+        samesite="lax",
+        path="/",
+        max_age=900
+    )
+
+    return {
+        "ok": True,
+        "mensaje": "Inicio de sesión exitoso",
+        "usuario": {
+            "id": str(user.id),
+            "empresa_uuid": user.empresa_uuid,
+            "nombre": user.nombre,
+            "correo": user.correo,
+            "usuario": user.usuario,
+            "activo": user.activo,
+            "permitir_nube": user.permitir_nube
+        }
+    }
+
+@app.get("/auth/me")
+async def auth_me(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    cookie_name = "__Host-fp_access" if IS_PROD else "fp_access"
+
+    token = request.cookies.get(cookie_name)
+
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="No hay una sesión activa"
+        )
+
+    try:
+        payload = jwt.decode(
+            token,
+            JWT_SECRET,
+            algorithms=[JWT_ALGORITHM]
+        )
+
+        if payload.get("typ") != "access":
+            raise HTTPException(
+                status_code=401,
+                detail="Token inválido"
+            )
+
+        user_id = payload.get("user_id")
+
+        if not user_id:
+            raise HTTPException(
+                status_code=401,
+                detail="Token inválido"
+            )
+
+        usuario_uuid = uuid.UUID(user_id)
+
+    except (JWTError, ValueError, TypeError):
+        raise HTTPException(
+            status_code=401,
+            detail="Sesión inválida o expirada"
+        )
+
+    result = await db.execute(
+        select(User).where(
+            User.id == usuario_uuid,
+            User.activo.is_(True),
+            User.deleted_at.is_(None)
+        )
+    )
+
+    usuario = result.scalar_one_or_none()
+
+    if not usuario:
+        raise HTTPException(
+            status_code=401,
+            detail="El usuario no existe o está desactivado"
+        )
+
+    return {
+        "ok": True,
+        "usuario": {
+            "id": str(usuario.id),
+            "empresa_uuid": usuario.empresa_uuid,
+            "nombre": usuario.nombre,
+            "correo": usuario.correo,
+            "usuario": usuario.usuario,
+            "activo": usuario.activo,
+            "permitir_nube": usuario.permitir_nube
+        }
+    }
