@@ -23886,3 +23886,235 @@ async def obtener_mi_empresa(
             "updated_at": empresa.updated_at.isoformat() if empresa.updated_at else None
         }
     }
+    
+
+@app.get("/productos")
+async def obtener_productos(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    pagina: int = Query(1, ge=1),
+    por_pagina: int = Query(25, ge=1, le=100),
+    busqueda: str | None = None,
+    stock: str = "Todos",
+    itbis: str = "Todos",
+    ordenar: str = "reciente",
+    unidad_id: UUID | None = None
+):
+    cookie_name = "__Host-fp_access" if IS_PROD else "fp_access"
+    token = request.cookies.get(cookie_name)
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Sesión no activa")
+
+    try:
+        payload = jwt.decode(
+            token,
+            JWT_SECRET,
+            algorithms=[JWT_ALGORITHM]
+        )
+
+        if payload.get("typ") != "access":
+            raise HTTPException(status_code=401, detail="Token inválido")
+
+        user_id = UUID(payload.get("user_id"))
+
+    except (JWTError, ValueError, TypeError):
+        raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
+
+    resultado_usuario = await db.execute(
+        select(User).where(
+            User.id == user_id,
+            User.activo.is_(True),
+            User.deleted_at.is_(None)
+        )
+    )
+
+    usuario = resultado_usuario.scalar_one_or_none()
+
+    if not usuario or not usuario.empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Usuario sin empresa asignada"
+        )
+
+    filtros = [
+        Producto.empresa_uuid == usuario.empresa_uuid,
+        Producto.activo.is_(True),
+        Producto.deleted_at.is_(None),
+        UnidadMedida.empresa_uuid == usuario.empresa_uuid,
+        UnidadMedida.deleted_at.is_(None)
+    ]
+
+    if busqueda and busqueda.strip():
+        termino = f"%{busqueda.strip()}%"
+
+        filtros.append(
+            or_(
+                Producto.nombre.ilike(termino),
+                Producto.codigo_barras.ilike(termino),
+                Producto.codigo_interno.ilike(termino),
+                Producto.codigo_balanza.ilike(termino)
+            )
+        )
+
+    if stock == "Disponible":
+        filtros.append(Producto.stock > Producto.stock_minimo)
+
+    elif stock == "Stock bajo":
+        filtros.extend([
+            Producto.stock > 0,
+            Producto.stock <= Producto.stock_minimo
+        ])
+
+    elif stock == "Sin stock":
+        filtros.append(Producto.stock <= 0)
+
+    if itbis in ("18", "16", "0"):
+        filtros.append(Producto.itbis == Decimal(itbis))
+
+    elif itbis == "Otros":
+        filtros.append(~Producto.itbis.in_([
+            Decimal("0"),
+            Decimal("16"),
+            Decimal("18")
+        ]))
+
+    if unidad_id:
+        filtros.append(Producto.unidad_id == unidad_id)
+
+    consulta_base = (
+        select(Producto, UnidadMedida)
+        .join(
+            UnidadMedida,
+            Producto.unidad_id == UnidadMedida.id
+        )
+        .where(*filtros)
+    )
+
+    total = await db.scalar(
+        select(func.count())
+        .select_from(consulta_base.subquery())
+    )
+
+    ordenamientos = {
+        "reciente": Producto.created_at.desc(),
+        "nombre": Producto.nombre.asc(),
+        "precio-asc": Producto.precio.asc(),
+        "precio-desc": Producto.precio.desc(),
+        "stock-asc": Producto.stock.asc(),
+        "stock-desc": Producto.stock.desc()
+    }
+
+    consulta = consulta_base.order_by(
+        ordenamientos.get(ordenar, Producto.created_at.desc())
+    )
+
+    resultado = await db.execute(
+        consulta
+        .offset((pagina - 1) * por_pagina)
+        .limit(por_pagina)
+    )
+
+    filas = resultado.all()
+
+    return {
+        "ok": True,
+        "productos": [
+            {
+                "id": str(p.id),
+                "codigo_barras": p.codigo_barras,
+                "codigo_balanza": p.codigo_balanza,
+                "codigo_interno": p.codigo_interno,
+                "es_balanza": p.es_balanza,
+                "nombre": p.nombre,
+                "precio": float(p.precio),
+                "costo": float(p.costo),
+                "margen": float(p.margen),
+                "stock": float(p.stock),
+                "stock_minimo": float(p.stock_minimo),
+                "itbis": float(p.itbis),
+                "unidad_id": str(p.unidad_id),
+                "unidad_nombre": u.nombre,
+                "unidad_plural": u.plural,
+                "permitir_decimal": u.permitir_decimal,
+                "activo": p.activo,
+                "version": p.version,
+                "sync_cursor": p.sync_cursor,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+                "updated_at": p.updated_at.isoformat() if p.updated_at else None
+            }
+            for p, u in filas
+        ],
+        "paginacion": {
+            "pagina": pagina,
+            "por_pagina": por_pagina,
+            "total": total or 0,
+            "total_paginas": (
+                (total + por_pagina - 1) // por_pagina
+                if total else 0
+            )
+        }
+    }
+
+@app.get("/unidades-medida")
+async def obtener_unidades(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    cookie_name = "__Host-fp_access" if IS_PROD else "fp_access"
+    token = request.cookies.get(cookie_name)
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Sesión no activa")
+
+    try:
+        payload = jwt.decode(
+            token,
+            JWT_SECRET,
+            algorithms=[JWT_ALGORITHM]
+        )
+
+        if payload.get("typ") != "access":
+            raise HTTPException(status_code=401, detail="Token inválido")
+
+        user_id = UUID(payload.get("user_id"))
+
+    except (JWTError, ValueError, TypeError):
+        raise HTTPException(status_code=401, detail="Sesión inválida")
+
+    resultado = await db.execute(
+        select(User).where(
+            User.id == user_id,
+            User.activo.is_(True),
+            User.deleted_at.is_(None)
+        )
+    )
+
+    usuario = resultado.scalar_one_or_none()
+
+    if not usuario or not usuario.empresa_uuid:
+        raise HTTPException(status_code=403, detail="Empresa no asignada")
+
+    resultado = await db.execute(
+        select(UnidadMedida)
+        .where(
+            UnidadMedida.empresa_uuid == usuario.empresa_uuid,
+            UnidadMedida.deleted_at.is_(None)
+        )
+        .order_by(UnidadMedida.nombre.asc())
+    )
+
+    unidades = resultado.scalars().all()
+
+    return {
+        "ok": True,
+        "unidades": [
+            {
+                "id": str(u.id),
+                "nombre": u.nombre,
+                "plural": u.plural,
+                "permitir_decimal": u.permitir_decimal
+            }
+            for u in unidades
+        ]
+    }
