@@ -23789,3 +23789,100 @@ async def auth_me(
             "permitir_nube": usuario.permitir_nube
         }
     }
+    
+@app.get("/empresa/mi-empresa")
+async def obtener_mi_empresa(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    cookie_name = "__Host-fp_access" if IS_PROD else "fp_access"
+    token = request.cookies.get(cookie_name)
+
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="No hay una sesión activa"
+        )
+
+    try:
+        payload = jwt.decode(
+            token,
+            JWT_SECRET,
+            algorithms=[JWT_ALGORITHM]
+        )
+
+        if payload.get("typ") != "access":
+            raise HTTPException(
+                status_code=401,
+                detail="Token inválido"
+            )
+
+        user_id = payload.get("user_id")
+
+        if not user_id:
+            raise HTTPException(
+                status_code=401,
+                detail="Token inválido"
+            )
+
+        usuario_uuid = uuid.UUID(user_id)
+
+    except (JWTError, ValueError, TypeError):
+        raise HTTPException(
+            status_code=401,
+            detail="Sesión inválida o expirada"
+        )
+
+    resultado_usuario = await db.execute(
+        select(User).where(
+            User.id == usuario_uuid,
+            User.activo.is_(True),
+            User.deleted_at.is_(None)
+        )
+    )
+
+    usuario = resultado_usuario.scalar_one_or_none()
+
+    if not usuario:
+        raise HTTPException(
+            status_code=401,
+            detail="Usuario no válido"
+        )
+
+    if not usuario.empresa_uuid:
+        raise HTTPException(
+            status_code=404,
+            detail="El usuario no tiene una empresa asignada"
+        )
+
+    resultado_empresa = await db.execute(
+        select(Company).where(
+            Company.uuid == usuario.empresa_uuid,
+            Company.deleted_at.is_(None)
+        )
+    )
+
+    empresa = resultado_empresa.scalar_one_or_none()
+
+    if not empresa:
+        raise HTTPException(
+            status_code=404,
+            detail="No se encontró la empresa"
+        )
+
+    return {
+        "ok": True,
+        "empresa": {
+            "id": empresa.id,
+            "uuid": empresa.uuid,
+            "nombre": empresa.nombre,
+            "telefono": empresa.telefono,
+            "rnc": empresa.rnc,
+            "direccion": empresa.direccion,
+            "ncf": empresa.ncf,
+            "uso_balanza": empresa.uso_balanza,
+            "facturas_electronicas": empresa.facturas_electronicas,
+            "created_at": empresa.created_at.isoformat() if empresa.created_at else None,
+            "updated_at": empresa.updated_at.isoformat() if empresa.updated_at else None
+        }
+    }
