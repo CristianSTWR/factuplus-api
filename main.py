@@ -23790,6 +23790,13 @@ async def auth_me(
         }
     }
     
+    
+async def enviar_evento_empresa(empresa_uuid, evento):
+    await enviar_evento(
+        str(empresa_uuid),
+        evento
+    )
+    
 @app.get("/empresa/mi-empresa")
 async def obtener_mi_empresa(
     request: Request,
@@ -24275,7 +24282,98 @@ async def registrar_entrada_stock(
 
         db.add(historial)
 
+        await db.flush()
+        
+        evento = {
+            "tipo": "producto_actualizado",
+            "accion": "stock_actualizado",
+
+            "movimiento_id": str(payload.movimiento_id),
+            "operacion_id": str(operacion_id),
+
+            "empresa_uuid": str(producto.empresa_uuid),
+            "producto_id": str(producto.id),
+
+            "cantidad": float(cantidad),
+            "tipo_movimiento": "entrada",
+
+            "stock_antes": float(stock_antes),
+            "stock_despues": float(stock_despues),
+
+            "referencia": payload.motivo.strip(),
+
+            "usuario_id": str(usuario.id),
+
+            "codigo_barras": producto.codigo_barras,
+            "codigo_balanza": producto.codigo_balanza,
+            "codigo_interno": producto.codigo_interno,
+
+            "es_balanza": producto.es_balanza,
+            "nombre": producto.nombre,
+
+            "precio": float(producto.precio or 0),
+            "costo": float(producto.costo or 0),
+
+            "stock": float(stock_despues),
+            "stock_minimo": float(producto.stock_minimo or 0),
+
+            "itbis": float(producto.itbis or 0),
+
+            "unidad_id": (
+                str(producto.unidad_id)
+                if producto.unidad_id
+                else None
+            ),
+
+            "activo": producto.activo,
+            "sync_status": producto.sync_status,
+
+            "deleted_at": (
+                producto.deleted_at.isoformat()
+                if producto.deleted_at
+                else None
+            ),
+
+            "version": producto.version,
+
+            "updated_at": (
+                producto.updated_at.isoformat()
+                if producto.updated_at
+                else None
+            ),
+
+            "created_at": (
+                producto.created_at.isoformat()
+                if producto.created_at
+                else None
+            ),
+
+            "sync_cursor": sync_cursor
+        }
+
         await db.commit()
+
+        try:
+            await enviar_evento_empresa(
+                str(usuario.empresa_uuid),
+                evento
+            )
+        except Exception:
+            logger.exception(
+                "ERROR ENVIANDO EVENTO WEBSOCKET DE ENTRADA DE STOCK"
+            )
+
+        return {
+            "ok": True,
+            "duplicado": False,
+            "movimiento_id": str(payload.movimiento_id),
+            "operacion_id": str(operacion_id),
+            "producto_id": str(producto.id),
+            "cantidad": float(cantidad),
+            "stock_antes": float(stock_antes),
+            "stock_despues": float(stock_despues),
+            "sync_cursor": sync_cursor
+        }
 
         return {
             "ok": True,
