@@ -24118,3 +24118,185 @@ async def obtener_unidades(
             for u in unidades
         ]
     }
+    
+
+class EntradaStockRequest(BaseModel):
+    cantidad: Decimal
+    motivo: str = Field(min_length=1, max_length=250)
+    movimiento_id: uuid.UUID
+
+
+
+@app.post("/productos/{producto_id}/stock/entrada")
+async def registrar_entrada_stock(
+    producto_id: uuid.UUID,
+    payload: EntradaStockRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    cookie_name = "__Host-fp_access" if IS_PROD else "fp_access"
+    token = request.cookies.get(cookie_name)
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Sesión no activa")
+
+    try:
+        token_data = jwt.decode(
+            token,
+            JWT_SECRET,
+            algorithms=[JWT_ALGORITHM]
+        )
+
+        if token_data.get("typ") != "access":
+            raise HTTPException(status_code=401, detail="Token inválido")
+
+        user_id = uuid.UUID(token_data.get("user_id"))
+
+    except (JWTError, ValueError, TypeError):
+        raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
+
+    resultado_usuario = await db.execute(
+        select(User).where(
+            User.id == user_id,
+            User.activo.is_(True),
+            User.deleted_at.is_(None)
+        )
+    )
+
+    usuario = resultado_usuario.scalar_one_or_none()
+
+    if not usuario or not usuario.empresa_uuid:
+        raise HTTPException(status_code=403, detail="Usuario sin empresa asignada")
+
+    cantidad = Decimal(str(payload.cantidad))
+
+    if not cantidad.is_finite() or cantidad <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="La cantidad debe ser mayor que cero"
+        )
+
+    if not payload.motivo.strip():
+        raise HTTPException(status_code=400, detail="Debes indicar el motivo")
+
+    try:
+        
+        resultado_producto = await db.execute(
+            select(Producto, UnidadMedida)
+            .join(
+                UnidadMedida,
+                and_(
+                    Producto.unidad_id == UnidadMedida.id,
+                    UnidadMedida.empresa_uuid == usuario.empresa_uuid,
+                    UnidadMedida.deleted_at.is_(None)
+                )
+            )
+            .where(
+                Producto.id == producto_id,
+                Producto.empresa_uuid == usuario.empresa_uuid,
+                Producto.activo.is_(True),
+                Producto.deleted_at.is_(None)
+            )
+            .with_for_update(of=Producto)
+        )
+
+        fila = resultado_producto.first()
+
+        if not fila:
+            raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+        producto, unidad = fila
+
+        if not unidad.permitir_decimal and cantidad != cantidad.to_integral_value():
+            raise HTTPException(
+                status_code=400,
+                detail="La unidad de este producto no permite cantidades decimales"
+            )
+
+
+        resultado_existente = await db.execute(
+            select(HistorialStock).where(
+                HistorialStock.movimiento_id == payload.movimiento_id,
+                HistorialStock.empresa_uuid == usuario.empresa_uuid
+            )
+        )
+
+        historial_existente = resultado_existente.scalar_one_or_none()
+
+        if historial_existente:
+            await db.rollback()
+
+            return {
+                "ok": True,
+                "duplicado": True,
+                "movimiento_id": str(payload.movimiento_id),
+                "sync_cursor": historial_existente.sync_cursor
+            }
+
+        resultado_cursor = await db.execute(
+            text("""
+                INSERT INTO empresa_sync_counters (
+                    empresa_uuid,
+                    historial_stock_cursor
+                )
+                VALUES (
+                    :empresa_uuid,
+                    1
+                )
+                ON CONFLICT (empresa_uuid)
+                DO UPDATE SET
+                    historial_stock_cursor =
+                        empresa_sync_counters.historial_stock_cursor + 1
+                RETURNING historial_stock_cursor
+            """),
+            {"empresa_uuid": usuario.empresa_uuid}
+        )
+
+        sync_cursor = resultado_cursor.scalar_one()
+
+        stock_antes = Decimal(str(producto.stock or 0))
+        stock_despues = stock_antes + cantidad
+
+        producto.stock = stock_despues
+        operacion_id = uuid.uuid4()
+        historial = HistorialStock(
+            movimiento_id=payload.movimiento_id,
+            operacion_id=operacion_id,
+            empresa_uuid=usuario.empresa_uuid,
+            producto_id=producto.id,
+            tipo_movimiento="entrada",
+            cantidad=cantidad,
+            stock_antes=stock_antes,
+            stock_despues=stock_despues,
+            referencia=payload.motivo.strip(),
+            usuario_id=usuario.id,
+            sync_cursor=sync_cursor
+        )
+
+        db.add(historial)
+
+        await db.commit()
+
+        return {
+            "ok": True,
+            "duplicado": False,
+            "movimiento_id": str(payload.movimiento_id),
+            "producto_id": str(producto.id),
+            "cantidad": float(cantidad),
+            "stock_antes": float(stock_antes),
+            "stock_despues": float(stock_despues),
+            "sync_cursor": sync_cursor
+        }
+
+    except HTTPException:
+        await db.rollback()
+        raise
+
+    except Exception:
+        await db.rollback()
+        logger.exception("ERROR REGISTRANDO ENTRADA DE STOCK")
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudo registrar la entrada de inventario"
+        )
+
