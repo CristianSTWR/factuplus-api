@@ -49,7 +49,8 @@ from sqlalchemy import (
     asc,
     update,
     cast,
-    String
+    String,
+    BigInteger
 )
 
 from sqlalchemy.exc import DBAPIError, IntegrityError
@@ -24398,3 +24399,290 @@ async def registrar_entrada_stock(
             detail="No se pudo registrar la entrada de inventario"
         )
 
+class ProductoCrearItem(BaseModel):
+    nombre: str
+    es_balanza: bool = False
+    codigo_barra: Optional[str] = None
+    codigo_balanza: Optional[str] = None
+    codigo_interno: Optional[str] = None
+    precio: Decimal = Decimal("0")
+    costo: Decimal = Decimal("0")
+    margen: Decimal = Decimal("0")
+    stock: Decimal = Decimal("0")
+    stock_alerta: Decimal = Decimal("0")
+    itbis: Decimal = Decimal("0")
+    unidad_id: UUID
+    
+class CrearProductosRequest(BaseModel):
+    productos: list[ProductoCrearItem]
+
+@app.post("/productos")
+async def registrar_productos(
+    payload: CrearProductosRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    cookie_name = "__Host-fp_access" if IS_PROD else "fp_access"
+    token = request.cookies.get(cookie_name)
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Sesión no activa")
+
+    try:
+        token_data = jwt.decode(
+            token,
+            JWT_SECRET,
+            algorithms=[JWT_ALGORITHM]
+        )
+
+        if token_data.get("typ") != "access":
+            raise HTTPException(status_code=401, detail="Token inválido")
+
+        user_id = uuid.UUID(token_data.get("user_id"))
+
+    except (JWTError, ValueError, TypeError):
+        raise HTTPException(
+            status_code=401,
+            detail="Sesión inválida o expirada"
+        )
+
+    resultado_usuario = await db.execute(
+        select(User).where(
+            User.id == user_id,
+            User.activo.is_(True),
+            User.deleted_at.is_(None)
+        )
+    )
+
+    usuario = resultado_usuario.scalar_one_or_none()
+
+    if not usuario or not usuario.empresa_uuid:
+        raise HTTPException(
+            status_code=403,
+            detail="Usuario sin empresa asignada"
+        )
+
+    if not payload.productos:
+        raise HTTPException(
+            status_code=400,
+            detail="Debes agregar al menos un producto"
+        )
+
+    eventos = []
+    productos_registrados = []
+
+    try:
+        for item in payload.productos:
+
+            nombre = item.nombre.strip()
+
+            if not nombre:
+                raise HTTPException(
+                    status_code=400,
+                    detail="El nombre del producto es obligatorio"
+                )
+
+            precio = Decimal(str(item.precio))
+            costo = Decimal(str(item.costo))
+            margen = Decimal(str(item.margen))
+            stock = Decimal(str(item.stock))
+            stock_minimo = Decimal(str(item.stock_alerta))
+            itbis = Decimal(str(item.itbis))
+
+            valores = [
+                precio,
+                costo,
+                margen,
+                stock,
+                stock_minimo,
+                itbis
+            ]
+
+            if any(not valor.is_finite() for valor in valores):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Valores numéricos inválidos para {nombre}"
+                )
+
+            if precio < 0 or costo < 0 or stock < 0 or stock_minimo < 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Los valores no pueden ser negativos para {nombre}"
+                )
+
+            resultado_unidad = await db.execute(
+                select(UnidadMedida).where(
+                    UnidadMedida.id == item.unidad_id,
+                    UnidadMedida.empresa_uuid == usuario.empresa_uuid,
+                    UnidadMedida.deleted_at.is_(None)
+                )
+            )
+
+            unidad = resultado_unidad.scalar_one_or_none()
+
+            if not unidad:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"La unidad de medida de {nombre} no es válida"
+                )
+
+            if not unidad.permitir_decimal and stock != stock.to_integral_value():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"La unidad de {nombre} no permite cantidades decimales"
+                )
+
+            producto_id = uuid.uuid4()
+
+            sync_cursor = await obtener_siguiente_productos_cursor(
+                db,
+                usuario.empresa_uuid
+            )
+            
+            resultado_codigo = await db.execute(
+                select(Producto.codigo_interno)
+                .where(
+                    Producto.empresa_uuid == usuario.empresa_uuid,
+                    Producto.codigo_interno.op("~")(r"^[0-9]+$")
+                )
+                .order_by(
+                    cast(Producto.codigo_interno, BigInteger).desc()
+                )
+                .limit(1)
+            )
+
+            ultimo_codigo = resultado_codigo.scalar_one_or_none()
+
+            codigo_interno = str(
+                int(ultimo_codigo) + 1 if ultimo_codigo else 1
+            )
+
+            producto = Producto(
+                id=producto_id,
+                empresa_uuid=usuario.empresa_uuid,
+
+                sync_cursor=sync_cursor,
+
+                codigo_barras=(
+                    item.codigo_barra.strip()
+                    if item.codigo_barra
+                    else None
+                ),
+
+                codigo_balanza=(
+                    item.codigo_balanza.strip()
+                    if item.codigo_balanza
+                    else None
+                ),
+
+                codigo_interno=codigo_interno,
+
+                es_balanza=item.es_balanza,
+                nombre=nombre,
+
+                precio=precio,
+                costo=costo,
+                margen=margen,
+
+                stock=stock,
+                stock_minimo=stock_minimo,
+
+                itbis=itbis,
+                unidad_id=unidad.id,
+
+                activo=True,
+                version=1,
+                sync_status="synced"
+            )
+
+            db.add(producto)
+
+            await db.flush()
+
+            evento = {
+                "tipo": "producto_actualizado",
+                "accion": "crear",
+
+                "empresa_uuid": str(usuario.empresa_uuid),
+                "producto_id": str(producto.id),
+
+                "codigo_barras": producto.codigo_barras,
+                "codigo_balanza": producto.codigo_balanza,
+                "codigo_interno": producto.codigo_interno,
+
+                "es_balanza": producto.es_balanza,
+                "nombre": producto.nombre,
+
+                "precio": float(producto.precio or 0),
+                "costo": float(producto.costo or 0),
+                "margen": float(producto.margen or 0),
+
+                "stock": float(producto.stock or 0),
+                "stock_minimo": float(producto.stock_minimo or 0),
+
+                "itbis": float(producto.itbis or 0),
+
+                "unidad_id": str(producto.unidad_id),
+
+                "activo": producto.activo,
+                "sync_status": producto.sync_status,
+                "version": producto.version,
+
+                "deleted_at": None,
+
+                "updated_at": (
+                    producto.updated_at.isoformat()
+                    if producto.updated_at
+                    else None
+                ),
+
+                "created_at": (
+                    producto.created_at.isoformat()
+                    if producto.created_at
+                    else None
+                ),
+
+                "sync_cursor": sync_cursor
+            }
+
+            eventos.append(evento)
+
+            productos_registrados.append({
+                "id": str(producto.id),
+                "nombre": producto.nombre,
+                "stock": float(producto.stock or 0),
+                "sync_cursor": sync_cursor
+            })
+
+        await db.commit()
+
+        for evento in eventos:
+            try:
+                await enviar_evento_empresa(
+                    str(usuario.empresa_uuid),
+                    evento
+                )
+            except Exception:
+                logger.exception(
+                    "ERROR ENVIANDO EVENTO WEBSOCKET DE CREACIÓN DE PRODUCTO"
+                )
+
+        return {
+            "ok": True,
+            "total": len(productos_registrados),
+            "productos": productos_registrados
+        }
+
+    except HTTPException:
+        await db.rollback()
+        raise
+
+    except Exception:
+        await db.rollback()
+
+        logger.exception("ERROR REGISTRANDO PRODUCTOS")
+
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudieron registrar los productos"
+        )
