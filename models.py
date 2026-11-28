@@ -528,6 +528,41 @@ class User(Base):
     unique=True,
     nullable=False
 )
+
+
+class WebSession(Base):
+    """Server-side session state for the browser application.
+
+    This is intentionally separate from ``refresh_tokens``: that table belongs
+    to the installed-product licence activation flow.
+    """
+    __tablename__ = "web_sessions"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("usuarios.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Only hashes are retained.  The previous hash lets us identify a rotated
+    # token being replayed and revoke the whole browser session.
+    refresh_token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    previous_refresh_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_activity_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_web_sessions_active_user", "user_id", "revoked_at"),
+        Index("ix_web_sessions_active_activity", "last_activity_at", "revoked_at"),
+    )
     
 class CajaConfig(Base):
 

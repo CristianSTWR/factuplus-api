@@ -56,7 +56,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import DBAPIError, IntegrityError
 import base64
 from fastapi import APIRouter, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from decimal import Decimal
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -112,14 +112,14 @@ from urllib.parse import urlparse, parse_qs
 import httpx
 import re
 # APLICACION
-from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, CajaConfig, CajaMovimiento, Venta, Caja, Producto, UnidadMedida, Rol, RolPermiso, UsuarioRol, MetodoPago, Cliente, Suplidor
+from models import Planes, PaypalEnv, License, PaypalWebhookEvent, Company, User, WebSession, CajaConfig, CajaMovimiento, Venta, Caja, Producto, UnidadMedida, Rol, RolPermiso, UsuarioRol, MetodoPago, Cliente, Suplidor
 from models import Compra, CompraDetalle, VentaDetalle, Pago, HistorialStock, Devolucion, DevolucionDetalle, Cotizacion, CotizacionDetalle, Descuento, DescuentoCliente, DescuentoCondicion, DescuentoDia, DescuentoProducto
 from models import SecuenciaECF, EcfFirmadorTicket, EcfRecepcionIntento, EcfAcuse, EcfRecibido, EcfCertificado, AuditoriaInventario, AuditoriaInventarioDetalle
 
 # WEB
 from models import ListaEspera, EmpresaDispositivo
 
-from db import get_db
+from db import get_db, AsyncSessionLocal
 
 validate_settings()
 
@@ -131,6 +131,113 @@ logger = logging.getLogger("factuplus")
 _docs = None if IS_PROD else "/docs"
 _redoc = None if IS_PROD else "/redoc"
 app = FastAPI(title="FACTUPLUS Licensing API", docs_url=_docs, redoc_url=_redoc)
+
+# Browser sessions have a sliding inactivity window.  Refresh tokens are opaque
+# and server-side, unlike the separate licence refresh-token mechanism above.
+WEB_ACCESS_MINUTES = 15
+WEB_IDLE_TIMEOUT = timedelta(hours=24)
+# Writing activity on every request creates needless database churn.  A touch
+# every five minutes is enough to keep an active browser session alive.
+WEB_ACTIVITY_TOUCH_INTERVAL = timedelta(minutes=5)
+
+def web_access_cookie_name() -> str:
+    return "__Host-fp_access" if IS_PROD else "fp_access"
+
+def web_refresh_cookie_name() -> str:
+    return "__Host-fp_refresh" if IS_PROD else "fp_refresh"
+
+def set_web_access_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=web_access_cookie_name(), value=token, httponly=True,
+        secure=IS_PROD, samesite="lax", path="/", max_age=WEB_ACCESS_MINUTES * 60,
+    )
+
+def set_web_refresh_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=web_refresh_cookie_name(), value=token, httponly=True,
+        secure=IS_PROD, samesite="lax", path="/", max_age=int(WEB_IDLE_TIMEOUT.total_seconds()),
+    )
+
+def clear_web_auth_cookies(response: Response) -> None:
+    for cookie_name in (web_access_cookie_name(), web_refresh_cookie_name()):
+        response.delete_cookie(
+            key=cookie_name, httponly=True, secure=IS_PROD,
+            samesite="lax", path="/",
+        )
+
+def issue_web_access_token(user: User, session_id: uuid.UUID) -> str:
+    now = datetime.now(timezone.utc)
+    return jwt.encode(
+        {
+            "user_id": str(user.id), "empresa_uuid": user.empresa_uuid,
+            "usuario": user.usuario, "sid": str(session_id), "typ": "access",
+            "iat": now, "exp": now + timedelta(minutes=WEB_ACCESS_MINUTES),
+        }, JWT_SECRET, algorithm=JWT_ALGORITHM,
+    )
+
+@app.middleware("http")
+async def enforce_web_session_inactivity(request: Request, call_next):
+    """Enforce/reasonably throttle the sliding web-session idle timeout.
+
+    It only applies to browser JWTs that carry ``sid``.  Licence API tokens and
+    their refresh endpoints therefore keep their existing behaviour.
+    """
+    if request.url.path in {"/auth/login", "/auth/refresh", "/auth/logout"}:
+        return await call_next(request)
+
+    access_token = request.cookies.get(web_access_cookie_name())
+    refresh_token = request.cookies.get(web_refresh_cookie_name())
+    if not access_token:
+        return await call_next(request)
+
+    try:
+        claims = jwt.decode(access_token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        if claims.get("typ") != "access":
+            return await call_next(request)
+        if not claims.get("sid"):
+            response = JSONResponse(status_code=401, content={"detail": "Sesión anterior no renovable; inicia sesión nuevamente"})
+            clear_web_auth_cookies(response)
+            return response
+        session_id = uuid.UUID(claims["sid"])
+        user_id = uuid.UUID(claims["user_id"])
+    except (JWTError, ValueError, TypeError):
+        # The endpoint still returns its normal 401 for a malformed/expired
+        # access token; /auth/refresh is deliberately excluded above.
+        return await call_next(request)
+
+    now = datetime.now(timezone.utc)
+    async with AsyncSessionLocal() as session_db:
+        session = await session_db.get(WebSession, session_id)
+        if (
+            not session or session.user_id != user_id or session.revoked_at is not None
+            or session.last_activity_at <= now - WEB_IDLE_TIMEOUT
+        ):
+            response = JSONResponse(status_code=401, content={"detail": "Sesión expirada por inactividad"})
+            clear_web_auth_cookies(response)
+            return response
+
+        # The conditional update makes concurrent requests safe and avoids a
+        # write on normal high-frequency API traffic.
+        if session.last_activity_at <= now - WEB_ACTIVITY_TOUCH_INTERVAL:
+            result = await session_db.execute(
+                update(WebSession)
+                .where(
+                    WebSession.id == session_id,
+                    WebSession.revoked_at.is_(None),
+                    WebSession.last_activity_at > now - WEB_IDLE_TIMEOUT,
+                    WebSession.last_activity_at <= now - WEB_ACTIVITY_TOUCH_INTERVAL,
+                )
+                .values(last_activity_at=now)
+            )
+            if result.rowcount:
+                await session_db.commit()
+
+    response = await call_next(request)
+    # Sliding the cookie lifetime prevents the browser from discarding a still
+    # active session before the server-side inactivity limit is reached.
+    if response.status_code < 400 and refresh_token:
+        set_web_refresh_cookie(response, refresh_token)
+    return response
 
 # Middlewares
 app.add_middleware(RequestIdMiddleware)
@@ -23673,40 +23780,23 @@ async def auth_login(
             detail="Correo o contraseña incorrectos"
         )
 
-    ahora = datetime.now(timezone.utc)
-
-    token = jwt.encode(
-        {
-            "user_id": str(user.id),
-            "empresa_uuid": user.empresa_uuid,
-            "usuario": user.usuario,
-            "typ": "access",
-            "iat": ahora,
-            "exp": ahora + timedelta(minutes=15)
-        },
-        JWT_SECRET,
-        algorithm=JWT_ALGORITHM
+    refresh_token = secrets.token_urlsafe(48)
+    web_session = WebSession(
+        user_id=user.id,
+        refresh_token_hash=sha256_hex(refresh_token),
+        last_activity_at=datetime.now(timezone.utc),
     )
+    db.add(web_session)
+    await db.flush()
 
-    cookie_name = (
-        "__Host-fp_access"
-        if IS_PROD
-        else "fp_access"
-    )
-
-    response.set_cookie(
-        key=cookie_name,
-        value=token,
-        httponly=True,
-        secure=IS_PROD,
-        samesite="lax",
-        path="/",
-        max_age=900
-    )
+    set_web_access_cookie(response, issue_web_access_token(user, web_session.id))
+    set_web_refresh_cookie(response, refresh_token)
+    await db.commit()
 
     return {
         "ok": True,
         "mensaje": "Inicio de sesión exitoso",
+        "access_expires_in": WEB_ACCESS_MINUTES * 60,
         "usuario": {
             "id": str(user.id),
             "empresa_uuid": user.empresa_uuid,
@@ -23717,6 +23807,80 @@ async def auth_login(
             "permitir_nube": user.permitir_nube
         }
     }
+
+
+@app.post("/auth/refresh")
+async def auth_refresh(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    """Rotate a browser refresh token and issue a new 15-minute access JWT."""
+    refresh_token = request.cookies.get(web_refresh_cookie_name())
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="No hay una sesión renovable")
+
+    token_hash = sha256_hex(refresh_token)
+    # Serialize rotations for this token.  A token already in the previous slot
+    # is a replay, so revoke the complete session rather than accepting it.
+    result = await db.execute(
+        select(WebSession).where(WebSession.refresh_token_hash == token_hash).with_for_update()
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        replay = await db.execute(
+            select(WebSession).where(WebSession.previous_refresh_token_hash == token_hash).with_for_update()
+        )
+        replay_session = replay.scalar_one_or_none()
+        if replay_session and replay_session.revoked_at is None:
+            replay_session.revoked_at = datetime.now(timezone.utc)
+            await db.commit()
+        failed = JSONResponse(status_code=401, content={"detail": "Refresh token inválido o reutilizado"})
+        clear_web_auth_cookies(failed)
+        return failed
+
+    now = datetime.now(timezone.utc)
+    if session.revoked_at is not None or session.last_activity_at <= now - WEB_IDLE_TIMEOUT:
+        if session.revoked_at is None:
+            session.revoked_at = now
+            await db.commit()
+        failed = JSONResponse(status_code=401, content={"detail": "Sesión expirada por inactividad"})
+        clear_web_auth_cookies(failed)
+        return failed
+
+    user = await db.get(User, session.user_id)
+    if not user or not user.activo or user.deleted_at is not None:
+        session.revoked_at = now
+        await db.commit()
+        failed = JSONResponse(status_code=401, content={"detail": "Usuario no válido"})
+        clear_web_auth_cookies(failed)
+        return failed
+
+    new_refresh_token = secrets.token_urlsafe(48)
+    session.previous_refresh_token_hash = session.refresh_token_hash
+    session.refresh_token_hash = sha256_hex(new_refresh_token)
+    session.last_activity_at = now
+    await db.commit()
+
+    set_web_access_cookie(response, issue_web_access_token(user, session.id))
+    set_web_refresh_cookie(response, new_refresh_token)
+    return {"ok": True, "access_expires_in": WEB_ACCESS_MINUTES * 60}
+
+
+@app.post("/auth/logout")
+async def auth_logout(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    refresh_token = request.cookies.get(web_refresh_cookie_name())
+    if refresh_token:
+        token_hash = sha256_hex(refresh_token)
+        result = await db.execute(
+            update(WebSession)
+            .where(
+                (WebSession.refresh_token_hash == token_hash)
+                | (WebSession.previous_refresh_token_hash == token_hash),
+                WebSession.revoked_at.is_(None),
+            )
+            .values(revoked_at=datetime.now(timezone.utc))
+        )
+        if result.rowcount:
+            await db.commit()
+    clear_web_auth_cookies(response)
+    return {"ok": True}
 
 @app.get("/auth/me")
 async def auth_me(
