@@ -24557,7 +24557,7 @@ async def registrar_productos(
                 int(ultimo_codigo) + 1 if ultimo_codigo else 1
             )
             
-            ahora = datetime.now(timezone.utc)a
+            ahora = datetime.now(timezone.utc)
 
             producto = Producto(
                 id=producto_id,
