@@ -24556,6 +24556,8 @@ async def registrar_productos(
             codigo_interno = str(
                 int(ultimo_codigo) + 1 if ultimo_codigo else 1
             )
+            
+            ahora = datetime.now(timezone.utc)a
 
             producto = Producto(
                 id=producto_id,
@@ -24592,9 +24594,13 @@ async def registrar_productos(
 
                 activo=True,
                 version=1,
-                sync_status="synced"
-            )
+                sync_status="synced",
 
+                created_at=ahora,
+                updated_at=ahora,
+                deleted_at=None
+            )
+            
             db.add(producto)
 
             await db.flush()
